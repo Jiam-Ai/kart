@@ -1,7 +1,7 @@
 import React, { useContext, useState, useId, useEffect } from 'react';
 import { AppContext } from '../App';
 import type { Product, Review } from '../types';
-import { getRelatedProductIds } from '../services/geminiService';
+import { summarizeProductReviews } from '../services/geminiService';
 import { ProductCard } from './ProductCard';
 
 interface ProductModalProps {
@@ -10,6 +10,8 @@ interface ProductModalProps {
     onClose: () => void;
     onAddReview: (productId: number, review: Review) => void;
     allProducts: Product[];
+    onVirtualTryOn: (product: Product) => void;
+    onStartNegotiation: (product: Product) => void;
 }
 
 const StarRating: React.FC<{ rating: number, setRating?: (rating: number) => void }> = ({ rating, setRating }) => {
@@ -39,11 +41,22 @@ const StarRating: React.FC<{ rating: number, setRating?: (rating: number) => voi
     );
 };
 
-const ReviewForm: React.FC<{ productId: number; onAddReview: (productId: number, review: Review) => void; }> = ({ productId, onAddReview }) => {
+const ReviewForm: React.FC<{ productId: number; onAddReview: (productId: number, review: Review) => void; translations: Record<string, string> }> = ({ productId, onAddReview, translations }) => {
     const [rating, setRating] = useState(0);
     const [comment, setComment] = useState('');
     const [author, setAuthor] = useState('');
+    const [image, setImage] = useState<string | undefined>();
     const inputClasses = "w-full p-2 border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white rounded-md";
+
+    const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+        if (e.target.files && e.target.files[0]) {
+            const reader = new FileReader();
+            reader.onloadend = () => {
+                setImage(reader.result as string);
+            };
+            reader.readAsDataURL(e.target.files[0]);
+        }
+    };
 
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
@@ -52,11 +65,13 @@ const ReviewForm: React.FC<{ productId: number; onAddReview: (productId: number,
                 rating,
                 comment,
                 author,
-                date: new Date().toISOString().split('T')[0]
+                date: new Date().toISOString().split('T')[0],
+                image
             });
             setRating(0);
             setComment('');
             setAuthor('');
+            setImage(undefined);
         }
     };
 
@@ -66,252 +81,183 @@ const ReviewForm: React.FC<{ productId: number; onAddReview: (productId: number,
             <div>
                 <StarRating rating={rating} setRating={setRating} />
             </div>
-            <input
-                type="text"
-                placeholder="Your Name"
-                value={author}
-                onChange={(e) => setAuthor(e.target.value)}
-                required
-                className={inputClasses}
-            />
-            <textarea
-                placeholder="Your review..."
-                value={comment}
-                onChange={(e) => setComment(e.target.value)}
-                required
-                rows={3}
-                className={inputClasses}
-            />
+            <input type="text" placeholder="Your Name" value={author} onChange={(e) => setAuthor(e.target.value)} required className={inputClasses}/>
+            <textarea placeholder="Your review..." value={comment} onChange={(e) => setComment(e.target.value)} required rows={3} className={inputClasses}/>
+            <div className="flex items-center gap-4">
+                <input type="file" id="review-image" accept="image/*" onChange={handleImageUpload} className="hidden" />
+                <label htmlFor="review-image" className="cursor-pointer bg-gray-200 dark:bg-gray-600 px-4 py-2 rounded-md text-sm font-semibold">{translations.upload_review_image}</label>
+                {image && <img src={image} alt="review preview" className="w-12 h-12 object-cover rounded-md"/>}
+            </div>
             <button type="submit" className="bg-primary text-white px-4 py-2 rounded-md">Submit Review</button>
         </form>
     );
 };
 
-export const ProductModal: React.FC<ProductModalProps> = ({ isOpen, product, onClose, onAddReview, allProducts }) => {
+export const ProductModal: React.FC<ProductModalProps> = ({ isOpen, product, onClose, onAddReview, allProducts, onVirtualTryOn, onStartNegotiation }) => {
     const context = useContext(AppContext);
     const [currentIndex, setCurrentIndex] = useState(0);
     const [quantity, setQuantity] = useState(1);
     const [selectedVariants, setSelectedVariants] = useState<{ [key: string]: string }>({});
-    const [relatedProducts, setRelatedProducts] = useState<Product[]>([]);
-    const [isLoadingRelated, setIsLoadingRelated] = useState(false);
+    const [reviewSummary, setReviewSummary] = useState<string>('');
+    const [isSummaryLoading, setIsSummaryLoading] = useState(false);
+    const [isSubscription, setIsSubscription] = useState(false);
 
     useEffect(() => {
         if (isOpen && product) {
             setCurrentIndex(0);
             setQuantity(1);
+            setIsSubscription(false);
 
-            // Set default variants
             const defaults: { [key: string]: string } = {};
             product.variants?.forEach(v => {
-                if (v.options.length > 0) {
-                    defaults[v.type] = v.options[0].name;
-                }
+                if (v.options.length > 0) defaults[v.type] = v.options[0].name;
             });
             setSelectedVariants(defaults);
 
-            // Fetch related products
-            const fetchRelated = async () => {
-                setIsLoadingRelated(true);
-                const ids = await getRelatedProductIds(product, allProducts);
-                const related = allProducts.filter(p => ids.includes(p.id));
-                setRelatedProducts(related);
-                setIsLoadingRelated(false);
-            };
-            fetchRelated();
-
+            if (product.reviews && product.reviews.length > 2) {
+                setIsSummaryLoading(true);
+                summarizeProductReviews(product.reviews).then(summary => {
+                    setReviewSummary(summary);
+                    setIsSummaryLoading(false);
+                });
+            } else {
+                setReviewSummary('');
+            }
         }
-    }, [isOpen, product, allProducts]);
+    }, [isOpen, product]);
     
     useEffect(() => {
         const handleKeyDown = (event: KeyboardEvent) => {
-            if (event.key === 'Escape') {
-                onClose();
-            }
+            if (!isOpen) return;
+            if (event.key === 'Escape') onClose();
+            if (event.key === 'ArrowLeft') prevImage();
+            if (event.key === 'ArrowRight') nextImage();
         };
-        if (isOpen) {
-            document.body.style.overflow = 'hidden';
-            window.addEventListener('keydown', handleKeyDown);
-        } else {
-            document.body.style.overflow = 'unset';
-        }
-        return () => {
-            window.removeEventListener('keydown', handleKeyDown);
-            document.body.style.overflow = 'unset';
-        };
-    }, [isOpen, onClose]);
+        window.addEventListener('keydown', handleKeyDown);
+        return () => window.removeEventListener('keydown', handleKeyDown);
+    }, [isOpen, product]);
 
-    if (!isOpen || !product) return null;
-
-    const { addToCart, translations } = context!;
-    const hasMultipleImages = product.images.length > 1;
-
-    // --- Variant Logic ---
-    const handleVariantSelect = (type: string, name: string) => {
-        setSelectedVariants(prev => ({...prev, [type]: name}));
-    };
+    const contextValue = useContext(AppContext);
+    if (!contextValue || !product) return null;
+    const { translations, addToCart } = contextValue;
     
-    // Find the price and stock for the currently selected variant combination
-    const { currentPrice, currentStock } = (() => {
-        if (!product.variants || product.variants.length === 0) {
-            return { currentPrice: product.price, currentStock: 100 }; // Assume stock for non-variant products
-        }
-        
-        let price = product.price; // Start with base price
-        let stock: number | null = null;
-
-        product.variants.forEach(variant => {
-            const selectedOptionName = selectedVariants[variant.type];
-            const selectedOption = variant.options.find(opt => opt.name === selectedOptionName);
-            if (selectedOption) {
-                price = selectedOption.price; // Variant price overrides base
-                if (stock === null || selectedOption.stock < stock) {
-                    stock = selectedOption.stock;
-                }
-            }
-        });
-
-        return { currentPrice: price, currentStock: stock ?? 0 };
-    })();
+    const nextImage = () => setCurrentIndex((prev) => (prev + 1) % product.images.length);
+    const prevImage = () => setCurrentIndex((prev) => (prev - 1 + product.images.length) % product.images.length);
     
-    const formattedPrice = new Intl.NumberFormat('en-US').format(currentPrice);
-
-    const goToPrevious = () => {
-        const isFirstSlide = currentIndex === 0;
-        const newIndex = isFirstSlide ? product.images.length - 1 : currentIndex - 1;
-        setCurrentIndex(newIndex);
-    };
-
-    const goToNext = () => {
-        const isLastSlide = currentIndex === product.images.length - 1;
-        const newIndex = isLastSlide ? 0 : currentIndex + 1;
-        setCurrentIndex(newIndex);
-    };
-
     const handleAddToCart = () => {
-        addToCart(product, quantity, selectedVariants);
+        addToCart(product, quantity, selectedVariants, isSubscription ? { frequency: 'monthly' } : undefined);
         onClose();
     };
+    
+    const relatedProducts = allProducts
+        .filter(p => p.category === product.category && p.id !== product.id)
+        .slice(0, 4);
 
     return (
-        <div className="fixed inset-0 bg-black bg-opacity-60 z-50 flex justify-center items-center backdrop-blur-sm" aria-modal="true" role="dialog" onClick={onClose}>
-            <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl w-full max-w-4xl m-4 transform transition-all flex flex-col max-h-[90vh]" onClick={e => e.stopPropagation()}>
-                <div className="flex flex-col md:flex-row flex-1 min-h-0">
-                    {/* Image Section */}
-                    <div className="w-full md:w-1/2 p-4 relative flex items-center justify-center bg-gray-100 dark:bg-gray-900 rounded-t-lg md:rounded-l-lg md:rounded-t-none">
-                         <img src={product.images[currentIndex]} alt={product.name} className="w-full h-full max-h-[50vh] md:max-h-full object-contain rounded-lg" />
-                         {hasMultipleImages && (
-                            <>
-                                <button onClick={goToPrevious} aria-label="Previous image" className="absolute top-1/2 left-2 -translate-y-1/2 bg-black/40 text-white p-2 rounded-full transition-opacity duration-300 focus:outline-none focus:ring-2 focus:ring-white">
-                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 19l-7-7 7-7" /></svg>
-                                </button>
-                                <button onClick={goToNext} aria-label="Next image" className="absolute top-1/2 right-2 -translate-y-1/2 bg-black/40 text-white p-2 rounded-full transition-opacity duration-300 focus:outline-none focus:ring-2 focus:ring-white">
-                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5l7 7-7 7" /></svg>
-                                </button>
-                            </>
-                         )}
-                         <div className="absolute bottom-4 left-1/2 -translate-x-1/2 flex space-x-2">
-                            {product.images.map((_, slideIndex) => (
-                                <button key={slideIndex} onClick={() => setCurrentIndex(slideIndex)} className={`h-2.5 w-2.5 rounded-full transition-all duration-300 ${currentIndex === slideIndex ? 'bg-primary scale-125' : 'bg-gray-400 hover:bg-gray-500'}`}></button>
-                            ))}
+        <div className={`fixed inset-0 bg-black bg-opacity-60 z-50 flex justify-center items-center backdrop-blur-sm transition-opacity ${isOpen ? 'opacity-100' : 'opacity-0 pointer-events-none'}`} onClick={onClose}>
+            <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl w-full max-w-5xl m-4 transform transition-all duration-300 max-h-[90vh] flex flex-col" onClick={e => e.stopPropagation()}>
+                <button onClick={onClose} className="absolute top-4 right-4 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 z-10" aria-label={translations.close}>
+                    <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+                </button>
+                <div className="flex-1 overflow-y-auto">
+                    <div className="grid grid-cols-1 md:grid-cols-2">
+                        <div className="relative p-4">
+                            <img src={product.images[currentIndex]} alt={product.name} className="w-full h-96 object-contain rounded-lg" />
+                            {product.images.length > 1 && (
+                                <>
+                                    <button onClick={prevImage} className="absolute left-6 top-1/2 -translate-y-1/2 bg-white/50 dark:bg-black/50 p-2 rounded-full hover:bg-white dark:hover:bg-black" aria-label="Previous image"><svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 19l-7-7 7-7"></path></svg></button>
+                                    <button onClick={nextImage} className="absolute right-6 top-1/2 -translate-y-1/2 bg-white/50 dark:bg-black/50 p-2 rounded-full hover:bg-white dark:hover:bg-black" aria-label="Next image"><svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5l7 7-7 7"></path></svg></button>
+                                </>
+                            )}
                         </div>
-                    </div>
-
-                    {/* Details Section */}
-                    <div className="w-full md:w-1/2 p-6 flex flex-col overflow-y-auto">
-                        <button onClick={onClose} className="absolute top-4 right-4 text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 z-10" aria-label="Close product view">
-                            <svg className="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path></svg>
-                        </button>
-                        
-                        <div>
+                        <div className="p-6">
                             <h2 className="text-3xl font-bold text-gray-800 dark:text-gray-100">{product.name}</h2>
-                            <p className="text-md text-gray-500 dark:text-gray-400 mt-2">Sold by: <span className="font-semibold text-gray-600 dark:text-gray-300">{product.vendor}</span></p>
-
-                            <div className="flex items-center space-x-2 mt-4">
+                            <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">Sold by {product.vendor}</p>
+                            <div className="flex items-center my-4">
                                 <StarRating rating={product.rating} />
-                                <span className="text-sm text-gray-600 dark:text-gray-300">{product.reviewsCount} {translations.reviews}</span>
+                                <span className="ml-2 text-sm text-gray-600 dark:text-gray-300">({product.reviewsCount} {translations.reviews})</span>
                             </div>
+                            <p className="text-gray-600 dark:text-gray-300 my-4">{product.description}</p>
+                             <p className="text-4xl font-bold text-primary dark:text-blue-400 mb-4">SLL {new Intl.NumberFormat('en-US').format(product.price)}</p>
                             
-                            <p className="text-gray-700 dark:text-gray-300 mt-4 whitespace-pre-wrap">{product.description}</p>
-                        </div>
-                        
-                        {/* Variant Selection */}
-                        <div className="mt-4 space-y-4">
-                            {product.variants?.map(variant => (
-                                <div key={variant.type}>
-                                    <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-200 mb-2">{variant.type}</h3>
-                                    <div className="flex flex-wrap gap-2">
-                                        {variant.options.map(opt => (
-                                            <button 
-                                                key={opt.name}
-                                                onClick={() => handleVariantSelect(variant.type, opt.name)}
-                                                className={`px-4 py-2 text-sm rounded-full border-2 transition-all ${selectedVariants[variant.type] === opt.name ? 'border-primary bg-primary text-white' : 'border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 dark:text-gray-200 hover:border-gray-400 dark:hover:border-gray-500'}`}
-                                            >
-                                                {opt.name}
-                                            </button>
-                                        ))}
+                            {product.isNegotiable && (
+                                <button onClick={() => onStartNegotiation(product)} className="w-full mb-4 text-center bg-gray-200 text-gray-800 dark:bg-gray-700 dark:text-gray-200 py-2.5 px-4 rounded-md font-semibold hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors">
+                                    🤝 {translations.make_an_offer}
+                                </button>
+                            )}
+
+                             {product.isSubscribable && (
+                                <div className="bg-lightgray dark:bg-gray-700 p-3 rounded-lg mb-4">
+                                    <h4 className="font-semibold">{translations.subscribe_and_save}</h4>
+                                    <p className="text-xs text-gray-500 dark:text-gray-400 mb-2">{translations.subscribe_prompt}</p>
+                                    <div className="flex gap-2">
+                                        <button onClick={() => setIsSubscription(false)} className={`flex-1 p-2 text-sm rounded ${!isSubscription ? 'bg-primary text-white' : 'bg-white dark:bg-gray-600'}`}>{translations.one_time_purchase}</button>
+                                        <button onClick={() => setIsSubscription(true)} className={`flex-1 p-2 text-sm rounded ${isSubscription ? 'bg-primary text-white' : 'bg-white dark:bg-gray-600'}`}>{translations.subscription}</button>
                                     </div>
                                 </div>
-                            ))}
-                        </div>
+                            )}
 
-
-                        <div className="mt-6 pt-4 border-t dark:border-gray-700">
-                            <p className="text-3xl font-bold text-primary dark:text-blue-400 mb-4">SLL {formattedPrice}</p>
                             <div className="flex items-center space-x-4 mb-4">
-                                <div className="flex items-center border dark:border-gray-600 rounded">
-                                    <button onClick={() => setQuantity(q => Math.max(1, q - 1))} className="px-3 py-2 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700" aria-label="Decrease quantity">-</button>
-                                    <span className="px-4 py-2 font-semibold dark:text-gray-200" aria-label="Current quantity">{quantity}</span>
-                                    <button onClick={() => setQuantity(q => q + 1)} className="px-3 py-2 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700" aria-label="Increase quantity">+</button>
+                                <div className="flex items-center border rounded dark:border-gray-600">
+                                    <button onClick={() => setQuantity(q => Math.max(1, q - 1))} className="px-3 py-2 text-gray-600 dark:text-gray-300" aria-label="Decrease quantity">-</button>
+                                    <span className="px-4 dark:text-gray-200">{quantity}</span>
+                                    <button onClick={() => setQuantity(q => q + 1)} className="px-3 py-2 text-gray-600 dark:text-gray-300" aria-label="Increase quantity">+</button>
                                 </div>
-                                <button 
-                                    onClick={handleAddToCart}
-                                    disabled={currentStock === 0}
-                                    className="flex-1 bg-secondary text-white py-3 rounded-lg font-semibold text-lg hover:bg-green-700 transition-colors flex items-center justify-center space-x-2 disabled:bg-gray-400 disabled:cursor-not-allowed"
-                                >
-                                   <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 11-4 0 2 2 0 014 0z" />
-                                    </svg>
-                                   <span>{currentStock > 0 ? translations.add_to_cart : 'Out of Stock'}</span>
-                                </button>
+                                <button onClick={handleAddToCart} className="flex-1 bg-secondary text-white py-3 px-4 rounded-md font-semibold hover:bg-green-700 transition-colors">{translations.add_to_cart}</button>
                             </div>
+                             {product.category === 'Clothing' && (
+                                 <button onClick={() => onVirtualTryOn(product)} className="w-full text-center bg-primary text-white py-2.5 px-4 rounded-md font-semibold hover:bg-blue-800 transition-colors">
+                                    {translations.virtual_try_on}
+                                </button>
+                            )}
                         </div>
+                    </div>
+                    
+                     <div className="p-6 border-t dark:border-gray-700">
+                        <h3 className="text-xl font-bold mb-4 dark:text-gray-100">{translations.reviews}</h3>
+                        
+                        {reviewSummary && (
+                             <div className="mb-6 p-4 bg-lightgray dark:bg-gray-700/50 rounded-lg">
+                                 <h4 className="font-semibold text-gray-700 dark:text-gray-200 mb-2">✨ {translations.review_summary}</h4>
+                                 {isSummaryLoading ? (
+                                     <p className="text-sm text-gray-500 dark:text-gray-400">{translations.summarizing_reviews}</p>
+                                 ) : (
+                                    <p className="text-sm text-gray-600 dark:text-gray-300 whitespace-pre-wrap">{reviewSummary}</p>
+                                 )}
+                             </div>
+                        )}
 
-                         {/* Reviews Section */}
-                        <div className="mt-6 pt-4 border-t dark:border-gray-700">
-                            <h3 className="text-xl font-bold dark:text-gray-100">Customer Reviews</h3>
-                            <div className="space-y-4 mt-4 max-h-48 overflow-y-auto">
-                                {product.reviews && product.reviews.length > 0 ? product.reviews.map((review, index) => (
-                                    <div key={index} className="border-b dark:border-gray-700 pb-2">
-                                        <div className="flex items-center justify-between">
-                                            <span className="font-semibold dark:text-gray-200">{review.author}</span>
+                        {product.reviews && product.reviews.length > 0 ? (
+                            product.reviews.map((review, i) => (
+                                <div key={i} className="border-b dark:border-gray-700 py-4">
+                                    <div className="flex justify-between items-start">
+                                        <div>
+                                            <p className="font-semibold dark:text-gray-200">{review.author}</p>
                                             <StarRating rating={review.rating} />
                                         </div>
-                                        <p className="text-gray-600 dark:text-gray-300 text-sm mt-1">{review.comment}</p>
+                                         <span className="text-xs text-gray-400">{review.date}</span>
                                     </div>
-                                )) : <p className="text-gray-500 dark:text-gray-400">No reviews yet.</p>}
-                            </div>
-                            <ReviewForm productId={product.id} onAddReview={onAddReview} />
-                        </div>
+                                    <p className="text-sm text-gray-600 dark:text-gray-300 mt-2">{review.comment}</p>
+                                    {review.image && <img src={review.image} alt="review image" className="mt-2 w-24 h-24 object-cover rounded-md"/>}
+                                </div>
+                            ))
+                        ) : (
+                            <p className="text-sm text-gray-500 dark:text-gray-400">No reviews yet.</p>
+                        )}
+                        <ReviewForm productId={product.id} onAddReview={onAddReview} translations={translations} />
                     </div>
-                </div>
-                 {/* Related Products */}
-                 {relatedProducts.length > 0 && (
-                     <div className="w-full p-6 border-t dark:border-gray-700">
-                        <h3 className="text-xl font-bold mb-4 dark:text-gray-100">You Might Also Like</h3>
-                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                           {relatedProducts.map(p => (
-                               <div key={p.id} onClick={() => {
-                                   // A bit of a hack to switch modal content. In a real app, you might lift state higher or use a router.
-                                   onClose();
-                                   // Use a timeout to allow the close animation to start before opening the new one.
-                                   setTimeout(() => context!.addToCart(p,0), 100); // addToCart with 0 to open modal
-                               }}>
-                                 <ProductCard product={p} />
-                               </div>
-                           ))}
+
+                    {relatedProducts.length > 0 && (
+                        <div className="p-6 border-t dark:border-gray-700 bg-lightgray dark:bg-gray-900/50">
+                            <h3 className="text-xl font-bold mb-4 dark:text-gray-100">Related Products</h3>
+                            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                                {relatedProducts.map(p => (
+                                    <ProductCard key={p.id} product={p} onQuickView={(prod) => { onClose(); setTimeout(() => contextValue.handleNavigation('shop', { productId: prod.id }), 100); }} />
+                                ))}
+                            </div>
                         </div>
-                     </div>
-                 )}
+                    )}
+                </div>
             </div>
         </div>
     );

@@ -1,5 +1,7 @@
 {
   "name": "salone kart",
   "description": "A modern e-commerce marketplace app tailored for Sierra Leone and the wider African region, allowing users to buy and sell products online. It features localized payment methods and language support.",
-  "requestFramePermissions": []
+  "requestFramePermissions": [
+    "microphone"
+  ]
 }

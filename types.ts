@@ -3,6 +3,7 @@ export interface Review {
   rating: number;
   comment: string;
   date: string;
+  image?: string; // For review images
 }
 
 export interface VariantOption {
@@ -32,6 +33,9 @@ export interface Product {
   sellerId: string;
   variants?: Variant[];
   reviews?: Review[];
+  isSubscribable?: boolean; // For Subscribe & Save
+  isNegotiable?: boolean; // For AI Price Haggling
+  minPrice?: number; // For AI Price Haggling
 }
 
 export interface CartItem {
@@ -39,6 +43,8 @@ export interface CartItem {
   quantity: number;
   variant?: { [key: string]: string }; // e.g., { Color: 'Red', Size: 'M' }
   cartItemId: string; // Unique identifier for product + variant combo
+  subscription?: { frequency: 'monthly' }; // For Subscribe & Save
+  negotiatedPrice?: number; // Price after AI haggling
 }
 
 export type Language = 'en' | 'krio';
@@ -49,6 +55,16 @@ export interface Seller {
   email: string;
   password: string; // In a real app, this would be a hash
   storeName: string;
+  story?: string; // For AI Vendor Spotlight
+  storyInputs?: string; // For AI Vendor Spotlight
+}
+
+export interface BuyerQuest {
+  id: string;
+  title: string;
+  description: string;
+  points: number;
+  isCompleted: boolean;
 }
 
 export interface Buyer {
@@ -57,6 +73,12 @@ export interface Buyer {
   password: string; // In a real app, this would be a hash
   fullName: string;
   phoneNumber: string;
+  browsingHistory: number[]; // Array of viewed product IDs for personalization
+  quests: BuyerQuest[];
+  loyalty?: {
+    points: number;
+    tier: 'Bronze' | 'Silver' | 'Gold';
+  };
 }
 
 export interface BuyerInfo {
@@ -65,18 +87,26 @@ export interface BuyerInfo {
   deliveryAddress: string;
 }
 
+export type OrderStatus = 'Pending' | 'Shipped' | 'Delivered' | 'Completed';
+
 export interface Order {
   id: string;
   date: string;
   buyerInfo: BuyerInfo;
   items: CartItem[];
   total: number;
+  status: OrderStatus;
   buyerId?: string; // Link order to a registered buyer
 }
 
 export interface ChatMessage {
   sender: 'user' | 'bot';
   text: string;
+}
+
+export interface NegotiationMessage extends ChatMessage {
+  offer?: number;
+  isFinal?: boolean;
 }
 
 export type View =

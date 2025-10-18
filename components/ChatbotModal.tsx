@@ -1,4 +1,3 @@
-
 import React, { useState, useContext, useEffect, useRef } from 'react';
 import { AppContext } from '../App';
 import type { ChatMessage } from '../types';
@@ -43,6 +42,16 @@ export const ChatbotModal: React.FC<ChatbotModalProps> = ({ isOpen, onClose, mes
         }
     };
 
+    const handleSuggestionClick = (suggestion: string) => {
+        onSendMessage(suggestion);
+    };
+
+    const suggestedPrompts = [
+        "Find me an outfit for a party",
+        "What headphones are the best?",
+        "How do I return an item?",
+    ];
+
     return (
         <div className="fixed inset-0 bg-black bg-opacity-30 z-50 flex justify-center items-end sm:items-center" aria-modal="true" role="dialog" onClick={onClose}>
             <div className="bg-white dark:bg-gray-800 rounded-t-2xl sm:rounded-2xl shadow-xl w-full max-w-md m-0 sm:m-4 flex flex-col transform transition-all max-h-[80vh]" onClick={e => e.stopPropagation()}>
@@ -74,6 +83,18 @@ export const ChatbotModal: React.FC<ChatbotModalProps> = ({ isOpen, onClose, mes
                     )}
                     <div ref={messagesEndRef} />
                 </div>
+
+                 {/* Suggested Prompts */}
+                {messages.length <= 2 && !isTyping && (
+                    <div className="p-2 border-t dark:border-gray-700 bg-white dark:bg-gray-800 flex flex-wrap gap-2 justify-center">
+                        {suggestedPrompts.map(prompt => (
+                            <button key={prompt} onClick={() => handleSuggestionClick(prompt)} className="text-xs text-primary dark:text-blue-400 bg-blue-100 dark:bg-primary/20 px-3 py-1.5 rounded-full hover:bg-blue-200 dark:hover:bg-primary/30 transition-colors">
+                                {prompt}
+                            </button>
+                        ))}
+                    </div>
+                )}
+
 
                 {/* Input Form */}
                 <div className="p-4 border-t dark:border-gray-700 bg-white dark:bg-gray-800 rounded-b-2xl sm:rounded-b-2xl">

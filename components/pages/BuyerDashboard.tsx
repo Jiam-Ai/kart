@@ -1,13 +1,24 @@
 import React, { useState, useContext, useMemo } from 'react';
 import { AppContext } from '../../App';
-import type { Buyer, Order } from '../../types';
+import type { Buyer, Order, OrderStatus } from '../../types';
+import { QuestsTab } from '../QuestsTab';
+
+const getStatusBadgeStyle = (status: OrderStatus) => {
+    switch (status) {
+        case 'Pending': return 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/50 dark:text-yellow-300';
+        case 'Shipped': return 'bg-blue-100 text-blue-800 dark:bg-blue-900/50 dark:text-blue-300';
+        case 'Delivered': return 'bg-purple-100 text-purple-800 dark:bg-purple-900/50 dark:text-purple-300';
+        case 'Completed': return 'bg-green-100 text-green-800 dark:bg-green-900/50 dark:text-green-300';
+        default: return 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-200';
+    }
+};
 
 const OrderHistoryTab: React.FC = () => {
     const context = useContext(AppContext);
     const [expandedOrderId, setExpandedOrderId] = useState<string | null>(null);
 
     if (!context) return null;
-    const { translations, orders, currentBuyer, handleNavigation } = context;
+    const { translations, orders, currentBuyer, handleNavigation, updateOrderStatus } = context;
 
     const buyerOrders = useMemo(() => {
         if (!currentBuyer) return [];
@@ -30,32 +41,33 @@ const OrderHistoryTab: React.FC = () => {
 
     return (
         <div className="space-y-4">
-            {buyerOrders.map(order => (
+            {buyerOrders.map(order => {
+                const statusKey = `status_${order.status.toLowerCase()}` as keyof typeof translations;
+                return (
                 <div key={order.id} className="bg-white dark:bg-gray-800 rounded-lg shadow-md overflow-hidden">
                     <div className="w-full p-4 text-left bg-gray-50 dark:bg-gray-700/50 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors focus:outline-none">
-                        <div className="flex justify-between items-center">
+                        <div className="flex justify-between items-center flex-wrap gap-4">
                             <div onClick={() => toggleOrder(order.id)} className="flex-grow cursor-pointer pr-4">
                                 <p className="font-semibold text-primary dark:text-blue-400">{translations.order_id}: {order.id}</p>
                                 <p className="text-sm text-gray-500 dark:text-gray-400">{translations.date}: {new Date(order.date).toLocaleDateString()}</p>
+                                <div className="mt-2">
+                                     <span className={`px-2 py-1 text-xs font-semibold rounded-full ${getStatusBadgeStyle(order.status)}`}>
+                                        {translations[statusKey] || order.status}
+                                     </span>
+                                </div>
                             </div>
                             <div className="flex items-center space-x-4">
-                                <div onClick={() => toggleOrder(order.id)} className="text-right cursor-pointer">
+                                <div className="text-right">
                                     <p className="font-bold text-lg text-gray-800 dark:text-gray-100">SLL {new Intl.NumberFormat('en-US').format(order.total)}</p>
                                     <span className="text-sm text-gray-500 dark:text-gray-400">{order.items.length} item(s)</span>
                                 </div>
-                                <button 
-                                    onClick={() => handleNavigation('track-order', { orderId: order.id })}
-                                    className="text-sm font-semibold bg-secondary text-white px-4 py-2 rounded-md hover:bg-green-700 transition-colors whitespace-nowrap"
-                                >
-                                    {translations.track_order}
-                                </button>
                             </div>
                         </div>
                     </div>
                     {expandedOrderId === order.id && (
                         <div className="p-4 border-t border-gray-200 dark:border-gray-700">
                             <h4 className="font-semibold text-gray-700 dark:text-gray-200 mb-2">{translations.items_in_order}</h4>
-                            <ul className="space-y-2">
+                            <ul className="space-y-2 mb-4">
                                 {order.items.map(item => (
                                     <li key={item.cartItemId} className="flex items-center space-x-3 text-sm">
                                         <img src={item.product.images[0]} alt={item.product.name} className="w-12 h-12 object-cover rounded" />
@@ -67,14 +79,29 @@ const OrderHistoryTab: React.FC = () => {
                                     </li>
                                 ))}
                             </ul>
+                            <div className="flex items-center gap-2">
+                                <button 
+                                    onClick={() => handleNavigation('track-order', { orderId: order.id })}
+                                    className="text-sm font-semibold bg-gray-200 text-gray-800 dark:bg-gray-600 dark:text-gray-200 px-4 py-2 rounded-md hover:bg-gray-300 dark:hover:bg-gray-500 transition-colors"
+                                >
+                                    {translations.track_order}
+                                </button>
+                                {order.status === 'Delivered' && (
+                                    <button
+                                        onClick={() => updateOrderStatus(order.id, 'Completed')}
+                                        className="text-sm font-semibold bg-secondary text-white px-4 py-2 rounded-md hover:bg-green-700 transition-colors"
+                                    >
+                                        {translations.confirm_receipt}
+                                    </button>
+                                )}
+                            </div>
                         </div>
                     )}
                 </div>
-            ))}
+            )})}
         </div>
     );
 };
-
 
 const MyProfileTab: React.FC = () => {
     const context = useContext(AppContext);
@@ -149,6 +176,7 @@ export const BuyerDashboard: React.FC = () => {
     const tabs = [
         { id: 'order-history', label: translations.order_history },
         { id: 'my-profile', label: translations.my_profile },
+        { id: 'loyalty-quests', label: translations.loyalty_and_quests },
     ];
     
     return (
@@ -179,9 +207,11 @@ export const BuyerDashboard: React.FC = () => {
                  <div id="panel-order-history" role="tabpanel" tabIndex={0} aria-labelledby="tab-order-history" className="focus:outline-none" hidden={activeTab !== 'order-history'}>
                     <OrderHistoryTab />
                 </div>
-                
                 <div id="panel-my-profile" role="tabpanel" tabIndex={0} aria-labelledby="tab-my-profile" className="focus:outline-none" hidden={activeTab !== 'my-profile'}>
                     <MyProfileTab />
+                </div>
+                <div id="panel-loyalty-quests" role="tabpanel" tabIndex={0} aria-labelledby="tab-loyalty-quests" className="focus:outline-none" hidden={activeTab !== 'loyalty-quests'}>
+                    <QuestsTab />
                 </div>
             </div>
         </main>

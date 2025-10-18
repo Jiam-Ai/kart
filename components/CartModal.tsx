@@ -11,7 +11,7 @@ interface CartModalProps {
 const CartModalRow: React.FC<{ item: CartItem }> = ({ item }) => {
     const context = useContext(AppContext);
     if (!context) return null;
-    const { updateQuantity, removeFromCart } = context;
+    const { updateQuantity, removeFromCart, translations } = context;
     const formattedPrice = new Intl.NumberFormat('en-US').format(item.product.price);
 
     const variantText = item.variant 
@@ -19,13 +19,16 @@ const CartModalRow: React.FC<{ item: CartItem }> = ({ item }) => {
         : null;
 
     return (
-        <div className="flex items-center justify-between py-4 border-b border-gray-200 dark:border-gray-700">
+        <div className="flex items-center justify-between py-4">
             <div className="flex items-center space-x-4 flex-1 min-w-0">
                 <img src={item.product.images[0]} alt={item.product.name} className="w-16 h-16 object-cover rounded-md flex-shrink-0" />
                 <div className="min-w-0">
                     <p className="font-semibold text-gray-800 dark:text-gray-100 truncate">{item.product.name}</p>
                     {variantText && <p className="text-xs text-gray-500 dark:text-gray-400">{variantText}</p>}
                     <p className="text-sm text-gray-500 dark:text-gray-400">SLL {formattedPrice}</p>
+                    {item.subscription && (
+                        <p className="text-xs font-bold text-secondary">{translations.subscription}</p>
+                    )}
                 </div>
             </div>
             <div className="flex items-center space-x-2 sm:space-x-4">
@@ -53,6 +56,18 @@ export const CartModal: React.FC<CartModalProps> = ({ isOpen, onClose, onCheckou
     }, [cart]);
     const formattedSubtotal = new Intl.NumberFormat('en-US').format(subtotal);
 
+    const cartByVendor = useMemo(() => {
+        // FIX: Explicitly type the accumulator in the `reduce` function to ensure correct type inference for `cartByVendor`. This resolves an issue where `items` was being inferred as `unknown`, causing a `.map` error.
+        return cart.reduce((acc: Record<string, CartItem[]>, item) => {
+            const vendor = item.product.vendor;
+            if (!acc[vendor]) {
+                acc[vendor] = [];
+            }
+            acc[vendor].push(item);
+            return acc;
+        }, {});
+    }, [cart]);
+
     if (!isOpen) return null;
 
     return (
@@ -69,7 +84,12 @@ export const CartModal: React.FC<CartModalProps> = ({ isOpen, onClose, onCheckou
                     {cart.length === 0 ? (
                         <p className="text-center text-gray-500 dark:text-gray-400 py-8">{translations.empty_cart}</p>
                     ) : (
-                        cart.map(item => <CartModalRow key={item.cartItemId} item={item} />)
+                        Object.entries(cartByVendor).map(([vendor, items]) => (
+                            <div key={vendor} className="mb-4">
+                                <h3 className="font-bold text-gray-600 dark:text-gray-300 border-b dark:border-gray-700 pb-2 mb-2">{vendor}</h3>
+                                {items.map(item => <CartModalRow key={item.cartItemId} item={item} />)}
+                            </div>
+                        ))
                     )}
                 </div>
                 

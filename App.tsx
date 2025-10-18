@@ -9,7 +9,6 @@ import { VendorAIAssistant } from './components/VendorAIAssistant';
 import { SellerDashboard } from './components/SellerDashboard';
 import { Auth } from './components/Auth';
 import { ProductModal } from './components/ProductModal';
-import { FlashDeals } from './components/FlashDeals';
 import { ChatbotWidget } from './components/ChatbotWidget';
 import { ChatbotModal } from './components/ChatbotModal';
 import { ComparisonTray } from './components/ComparisonTray';
@@ -17,6 +16,13 @@ import { ComparisonModal } from './components/ComparisonModal';
 import { MobileNavMenu } from './components/MobileNavMenu';
 import { FilterDrawer } from './components/FilterDrawer';
 import { FilterControls } from './components/FilterControls';
+import { VisualSearchModal } from './components/VisualSearchModal';
+import { VirtualTryOnModal } from './components/VirtualTryOnModal';
+import { ShopTheLook } from './components/ShopTheLook';
+import { PriceNegotiationModal } from './components/PriceNegotiationModal';
+import { VendorSpotlightModal } from './components/VendorSpotlightModal';
+import { VendorSpotlight } from './components/VendorSpotlight';
+import { ForYouTab } from './components/ForYouTab';
 
 // Page Components
 import { AboutUs } from './components/pages/AboutUs';
@@ -31,17 +37,23 @@ import { TrackOrder } from './components/pages/TrackOrder';
 import { VendorHub } from './components/pages/VendorHub';
 import { BuyerDashboard } from './components/pages/BuyerDashboard';
 
-import type { Product, CartItem, Language, Seller, Order, BuyerInfo, Review, View, ChatMessage, Buyer, Theme } from './types';
-import { MOCK_PRODUCTS, CATEGORIES, TRANSLATIONS, LOCAL_STORAGE_KEYS, SESSION_STORAGE_KEYS, MOCK_ORDERS } from './constants';
-import { createChatSession } from './services/geminiService';
-import { Chat } from '@google/genai';
+import type { Product, CartItem, Language, Seller, Order, BuyerInfo, Review, View, ChatMessage, Buyer, Theme, OrderStatus } from './types';
+import { MOCK_PRODUCTS, CATEGORIES, TRANSLATIONS, LOCAL_STORAGE_KEYS, SESSION_STORAGE_KEYS, MOCK_ORDERS, MOCK_QUESTS } from './constants';
+import { createChatSession, getPersonalizedRecommendations, processKrioVoiceCommand } from './services/geminiService';
+import { Chat, FunctionCall } from '@google/genai';
 
 const mockBuyerForDisplay: Buyer = {
     id: 'buyer-demo-1',
     email: 'demo.user@salonekart.sl',
     password: 'password123',
     fullName: 'Demo User',
-    phoneNumber: '077-123-456'
+    phoneNumber: '077-123-456',
+    browsingHistory: [],
+    quests: MOCK_QUESTS,
+    loyalty: {
+        points: 1250,
+        tier: 'Silver'
+    }
 };
 
 export const AppContext = React.createContext<{
@@ -49,7 +61,7 @@ export const AppContext = React.createContext<{
     translations: Record<string, string>;
     setLanguage: (lang: Language) => void;
     cart: CartItem[];
-    addToCart: (product: Product, quantity?: number, variant?: { [key: string]: string }) => void;
+    addToCart: (product: Product, quantity?: number, variant?: { [key: string]: string }, subscription?: { frequency: 'monthly' }, negotiatedPrice?: number) => void;
     removeFromCart: (cartItemId: string) => void;
     updateQuantity: (cartItemId: string, quantity: number) => void;
     currentSeller: Seller | null;
@@ -66,6 +78,10 @@ export const AppContext = React.createContext<{
     clearCompareList: () => void;
     currentView: View;
     openCart: () => void;
+    startNegotiation: (product: Product) => void;
+    updateSellerStory: (story: string, inputs: string) => void;
+    updateOrderStatus: (orderId: string, status: OrderStatus) => void;
+    placeOrder: (buyerInfo: BuyerInfo) => Order | null;
 } | null>(null);
 
 
@@ -105,6 +121,16 @@ const App: React.FC = () => {
     const [isMobileNavOpen, setIsMobileNavOpen] = useState(false);
     const [isFilterDrawerOpen, setIsFilterDrawerOpen] = useState(false);
 
+    // Advanced Features State
+    const [isVisualSearchOpen, setIsVisualSearchOpen] = useState(false);
+    const [isVirtualTryOnOpen, setIsVirtualTryOnOpen] = useState(false);
+    const [productForTryOn, setProductForTryOn] = useState<Product | null>(null);
+    const [visualSearchResults, setVisualSearchResults] = useState<Product[] | null>(null);
+    const [negotiationModal, setNegotiationModal] = useState<{ isOpen: boolean; product: Product | null }>({ isOpen: false, product: null });
+    const [vendorSpotlightModal, setVendorSpotlightModal] = useState(false);
+    const [activeShopTab, setActiveShopTab] = useState('all_products');
+    const [forYouProducts, setForYouProducts] = useState<Product[] | null>(null);
+
 
     useEffect(() => {
         // Load products, orders, and sessions
@@ -133,20 +159,6 @@ const App: React.FC = () => {
                     setUnseenOrderIds(unseenOrdersJSON ? JSON.parse(unseenOrdersJSON) : []);
                 }
             }
-
-            /*
-            // Check for active buyer session
-            const loggedInBuyerId = sessionStorage.getItem(SESSION_STORAGE_KEYS.BUYER_ID);
-            if (loggedInBuyerId) {
-                const buyersJSON = localStorage.getItem(LOCAL_STORAGE_KEYS.BUYERS);
-                const buyers: Buyer[] = buyersJSON ? JSON.parse(buyersJSON) : [];
-                const loggedInBuyer = buyers.find(b => b.id === loggedInBuyerId);
-                if (loggedInBuyer) {
-                    setCurrentBuyer(loggedInBuyer);
-                }
-            }
-            */
-
         } catch (error) {
             console.error("Failed to load data from localStorage", error);
             setProducts(MOCK_PRODUCTS);
@@ -195,11 +207,30 @@ const App: React.FC = () => {
         }
     }, [language]);
     
-    const handleOpenProductModal = (product: Product) => setProductModal({ isOpen: true, product });
+    const handleOpenProductModal = (product: Product) => {
+        setProductModal({ isOpen: true, product });
+        // Track browsing history for personalization
+        if (currentBuyer) {
+            const updatedHistory = [...new Set([product.id, ...currentBuyer.browsingHistory])].slice(0, 20); // Keep last 20
+            setCurrentBuyer(prev => ({ ...prev!, browsingHistory: updatedHistory }));
+        }
+    };
     const handleCloseProductModal = () => setProductModal({ isOpen: false, product: null });
     const openCart = () => setIsCartOpen(true);
+    const handleOpenVirtualTryOn = (product: Product) => {
+        setProductForTryOn(product);
+        setIsVirtualTryOnOpen(true);
+        setProductModal({ isOpen: false, product: null });
+    };
+
+    const handleStartNegotiation = (product: Product) => {
+        setNegotiationModal({ isOpen: true, product });
+        handleCloseProductModal();
+    };
 
     const handleNavigation = (targetView: View, payload?: { orderId?: string }) => {
+        setVisualSearchResults(null);
+        setActiveShopTab('all_products'); // Reset to default tab
         if (targetView === 'track-order' && payload?.orderId) {
             setPrefilledOrderId(payload.orderId);
         } else {
@@ -225,7 +256,11 @@ const App: React.FC = () => {
         setIsBotTyping(true);
 
         try {
-            const response = await chatSession.sendMessage({ message });
+            const productContext = products.slice(0, 10).map(p => ({id: p.id, name: p.name, category: p.category})).toString();
+            const fullMessage = `${message}\n\nProduct Context: ${productContext}`;
+            
+            const response = await chatSession.sendMessage({ message: fullMessage });
+
             const botMessage: ChatMessage = { sender: 'bot', text: response.text };
             setChatMessages(prev => [...prev, botMessage]);
         } catch (error) {
@@ -269,6 +304,7 @@ const App: React.FC = () => {
 
     const filteredProducts = useMemo(() => {
         if (view !== 'shop') return [];
+        if (visualSearchResults) return visualSearchResults;
         
         const filtered = products
             .filter(p => selectedCategory === 'All' || p.category === selectedCategory)
@@ -295,13 +331,7 @@ const App: React.FC = () => {
         });
 
         return sorted;
-    }, [products, selectedCategory, searchTerm, sortOrder, view, selectedPriceRange, selectedRating]);
-
-    const flashDealProducts = useMemo(() => {
-        return products
-            .filter(p => p.saleEndDate && new Date(p.saleEndDate) > new Date())
-            .sort((a, b) => new Date(a.saleEndDate!).getTime() - new Date(b.saleEndDate!).getTime());
-    }, [products]);
+    }, [products, selectedCategory, searchTerm, sortOrder, view, selectedPriceRange, selectedRating, visualSearchResults]);
     
     const sellerOrders = useMemo(() => {
         if (!currentSeller) return [];
@@ -313,7 +343,7 @@ const App: React.FC = () => {
             return {
                 ...order,
                 items: sellerItems,
-                total: sellerItems.reduce((acc, item) => acc + item.product.price * item.quantity, 0),
+                total: sellerItems.reduce((acc, item) => acc + (item.negotiatedPrice ?? item.product.price) * item.quantity, 0),
             };
         }).filter((order): order is Order => order !== null);
         
@@ -438,10 +468,12 @@ const App: React.FC = () => {
     }, [currentBuyer]);
 
 
-    const addToCart = useCallback((product: Product, quantity: number = 1, variant?: { [key: string]: string }) => {
+    const addToCart = useCallback((product: Product, quantity: number = 1, variant?: { [key: string]: string }, subscription?: { frequency: 'monthly' }, negotiatedPrice?: number) => {
         setCart(prevCart => {
             const variantString = variant ? Object.entries(variant).sort().join('-') : 'none';
-            const cartItemId = `${product.id}-${variantString}`;
+            const subString = subscription ? `-${subscription.frequency}` : '';
+            const priceString = negotiatedPrice ? `-neg${negotiatedPrice}` : '';
+            const cartItemId = `${product.id}-${variantString}${subString}${priceString}`;
             
             const existingItem = prevCart.find(item => item.cartItemId === cartItemId);
             if (existingItem) {
@@ -451,7 +483,7 @@ const App: React.FC = () => {
                         : item
                 );
             }
-            return [...prevCart, { product, quantity, variant, cartItemId }];
+            return [...prevCart, { product, quantity, variant, cartItemId, subscription, negotiatedPrice }];
         });
     }, []);
 
@@ -486,16 +518,17 @@ const App: React.FC = () => {
         }
     }, [currentSeller, unseenOrderIds]);
     
-    const handlePlaceOrder = (buyerInfo: BuyerInfo) => {
-        if (cart.length === 0) return;
+    const placeOrder = (buyerInfo: BuyerInfo): Order | null => {
+        if (cart.length === 0) return null;
 
         const newOrder: Order = {
             id: `SK-${Date.now()}`,
             date: new Date().toISOString(),
             buyerInfo,
             items: cart,
-            total: cart.reduce((sum, item) => sum + item.product.price * item.quantity, 0),
+            total: cart.reduce((sum, item) => sum + (item.negotiatedPrice ?? item.product.price) * item.quantity, 0),
             buyerId: currentBuyer ? currentBuyer.id : undefined,
+            status: 'Pending',
         };
 
         const updatedOrders = [...orders, newOrder];
@@ -524,12 +557,24 @@ const App: React.FC = () => {
 
         } catch (error) {
             console.error("Failed to save order to localStorage", error);
+            return null; // Indicate failure
         }
 
-        alert('Order placed successfully! (This is a demo)');
         setCart([]);
-        setIsCheckoutOpen(false);
+        return newOrder;
     };
+
+    const updateOrderStatus = useCallback((orderId: string, status: OrderStatus) => {
+        const updatedOrders = orders.map(order => 
+            order.id === orderId ? { ...order, status } : order
+        );
+        setOrders(updatedOrders);
+        try {
+             localStorage.setItem(LOCAL_STORAGE_KEYS.ORDERS, JSON.stringify(updatedOrders));
+        } catch (error) {
+            console.error("Failed to update order status in localStorage", error);
+        }
+    }, [orders]);
 
     const toggleTheme = () => {
         setTheme(prevTheme => (prevTheme === 'light' ? 'dark' : 'light'));
@@ -554,6 +599,74 @@ const App: React.FC = () => {
         setComparisonList([]);
     }, []);
 
+    const handleVoiceSearch = () => {
+        if (!('webkitSpeechRecognition' in window)) {
+            alert("Sorry, your browser doesn't support voice search.");
+            return;
+        }
+        
+        const recognition = new (window as any).webkitSpeechRecognition();
+        recognition.lang = 'en-US'; // Best effort for Krio
+        recognition.interimResults = false;
+
+        recognition.onstart = () => {
+            alert(TRANSLATIONS[language].voice_search_prompt);
+        };
+
+        recognition.onresult = async (event: any) => {
+            const command = event.results[0][0].transcript;
+            console.log("Voice command:", command);
+            
+            const response = await processKrioVoiceCommand(command);
+            const functionCall: FunctionCall | undefined = response.functionCalls?.[0];
+
+            if (functionCall) {
+                if (functionCall.name === 'search_products') {
+                    setSearchTerm(functionCall.args.query);
+                } else if (functionCall.name === 'add_to_cart') {
+                    const productName = functionCall.args.productName.toLowerCase();
+                    const productToAdd = products.find(p => p.name.toLowerCase().includes(productName));
+                    if (productToAdd) {
+                        addToCart(productToAdd);
+                        openCart();
+                    } else {
+                        alert(`Sorry, I couldn't find a product named "${productName}".`);
+                    }
+                }
+            } else {
+                alert("I didn't quite understand that. Please try again.");
+            }
+        };
+        
+        recognition.onerror = (event: any) => {
+            console.error("Voice recognition error", event.error);
+        };
+        
+        recognition.start();
+    };
+
+    const updateSellerStory = useCallback((story: string, inputs: string) => {
+        if (!currentSeller) return;
+        updateSellerProfile({ story, storyInputs: inputs });
+    }, [currentSeller, updateSellerProfile]);
+
+    const fetchForYouProducts = useCallback(async () => {
+        if (currentBuyer && currentBuyer.browsingHistory.length > 0) {
+            setForYouProducts(null); // Show loader
+            const ids = await getPersonalizedRecommendations(currentBuyer.browsingHistory, products);
+            const recommendedProducts = products.filter(p => ids.includes(p.id));
+            setForYouProducts(recommendedProducts);
+        } else {
+             setForYouProducts([]); // No history, show empty state
+        }
+    }, [currentBuyer, products]);
+
+    useEffect(() => {
+        if (view === 'shop' && activeShopTab === 'for_you') {
+            fetchForYouProducts();
+        }
+    }, [view, activeShopTab, fetchForYouProducts]);
+
     const renderContent = () => {
         switch (view) {
             case 'auth':
@@ -569,6 +682,7 @@ const App: React.FC = () => {
                         onUpdateProfile={updateSellerProfile}
                         unseenOrderIds={unseenOrderIds}
                         onViewOrders={markOrdersAsSeen}
+                        onOpenStoryModal={() => setVendorSpotlightModal(true)}
                     />;
                 }
                 return null;
@@ -599,8 +713,7 @@ const App: React.FC = () => {
             default:
                 return (
                     <>
-                        {flashDealProducts.length > 0 && <FlashDeals products={flashDealProducts} onOpenProductModal={handleOpenProductModal} />}
-                        <main className="container mx-auto px-4 py-8">
+                         <main className="container mx-auto px-4 py-8">
                            <div className="lg:hidden mb-6">
                                 <FilterControls 
                                     onFilterClick={() => setIsFilterDrawerOpen(true)}
@@ -624,7 +737,32 @@ const App: React.FC = () => {
                                     <div className="hidden lg:block">
                                       <VendorAIAssistant />
                                     </div>
-                                    <ProductGrid products={filteredProducts} onOpenProductModal={handleOpenProductModal} />
+                                    <ShopTheLook onOpenProductModal={handleOpenProductModal} />
+                                    <VendorSpotlight />
+
+                                    <div className="flex border-b-2 dark:border-gray-700 mb-6">
+                                        <button onClick={() => setActiveShopTab('all_products')} className={`py-2 px-4 font-semibold ${activeShopTab === 'all_products' ? 'border-b-2 border-primary text-primary dark:text-blue-400' : 'text-gray-500'}`}>
+                                            {TRANSLATIONS[language].all_products}
+                                        </button>
+                                        <button onClick={() => setActiveShopTab('for_you')} className={`py-2 px-4 font-semibold ${activeShopTab === 'for_you' ? 'border-b-2 border-primary text-primary dark:text-blue-400' : 'text-gray-500'}`}>
+                                            {TRANSLATIONS[language].for_you}
+                                        </button>
+                                    </div>
+
+                                    {activeShopTab === 'all_products' && (
+                                        <>
+                                            {visualSearchResults && (
+                                                <div className="mb-4 flex justify-between items-center">
+                                                    <h2 className="text-xl font-bold dark:text-white">Visually Similar Results</h2>
+                                                    <button onClick={() => setVisualSearchResults(null)} className="text-sm font-semibold text-primary hover:underline">Clear Search</button>
+                                                </div>
+                                            )}
+                                            <ProductGrid products={filteredProducts} onOpenProductModal={handleOpenProductModal} />
+                                        </>
+                                    )}
+                                    {activeShopTab === 'for_you' && (
+                                        <ForYouTab products={forYouProducts} onOpenProductModal={handleOpenProductModal} />
+                                    )}
                                 </div>
                             </div>
                         </main>
@@ -655,6 +793,10 @@ const App: React.FC = () => {
         clearCompareList,
         currentView: view,
         openCart,
+        startNegotiation: handleStartNegotiation,
+        updateSellerStory,
+        updateOrderStatus,
+        placeOrder,
     };
 
     return (
@@ -665,6 +807,9 @@ const App: React.FC = () => {
                     onCartClick={openCart}
                     currentView={view}
                     onMenuClick={() => setIsMobileNavOpen(true)}
+                    onVisualSearchClick={() => setIsVisualSearchOpen(true)}
+                    onVoiceSearch={handleVoiceSearch}
+                    allProducts={products}
                 />
                  <MobileNavMenu 
                     isOpen={isMobileNavOpen} 
@@ -682,7 +827,6 @@ const App: React.FC = () => {
                 <CheckoutModal
                     isOpen={isCheckoutOpen}
                     onClose={() => setIsCheckoutOpen(false)}
-                    onPlaceOrder={handlePlaceOrder}
                 />
                  <ProductModal
                     isOpen={productModal.isOpen}
@@ -690,6 +834,28 @@ const App: React.FC = () => {
                     onClose={handleCloseProductModal}
                     onAddReview={addProductReview}
                     allProducts={products}
+                    onVirtualTryOn={handleOpenVirtualTryOn}
+                    onStartNegotiation={handleStartNegotiation}
+                />
+                <PriceNegotiationModal
+                    isOpen={negotiationModal.isOpen}
+                    product={negotiationModal.product}
+                    onClose={() => setNegotiationModal({ isOpen: false, product: null })}
+                />
+                <VendorSpotlightModal
+                    isOpen={vendorSpotlightModal}
+                    onClose={() => setVendorSpotlightModal(false)}
+                />
+                <VisualSearchModal 
+                    isOpen={isVisualSearchOpen}
+                    onClose={() => setIsVisualSearchOpen(false)}
+                    allProducts={products}
+                    onResults={setVisualSearchResults}
+                />
+                <VirtualTryOnModal
+                    isOpen={isVirtualTryOnOpen}
+                    onClose={() => setIsVirtualTryOnOpen(false)}
+                    product={productForTryOn}
                 />
                  <FilterDrawer
                     isOpen={isFilterDrawerOpen}
@@ -700,8 +866,6 @@ const App: React.FC = () => {
                         selectedCategory={selectedCategory}
                         onSelectCategory={(cat) => {
                             setSelectedCategory(cat);
-                            // Optional: close drawer on selection
-                            // setIsFilterDrawerOpen(false);
                         }}
                         selectedPriceRange={selectedPriceRange}
                         onSelectPriceRange={setSelectedPriceRange}

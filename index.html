@@ -27,6 +27,20 @@
       .backdrop-enter-active { opacity: 1; transition: opacity 300ms; }
       .backdrop-exit { opacity: 1; }
       .backdrop-exit-active { opacity: 0; transition: opacity 300ms; }
+
+      @keyframes pulse-badge {
+        0%, 100% {
+          transform: scale(1);
+          box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7);
+        }
+        50% {
+          transform: scale(1.1);
+          box-shadow: 0 0 0 6px rgba(239, 68, 68, 0);
+        }
+      }
+      .animate-pulse-badge {
+        animation: pulse-badge 2s infinite;
+      }
     </style>
     <script>
       tailwind.config = {

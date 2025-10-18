@@ -1,6 +1,6 @@
-
 import React, { useState, useContext } from 'react';
 import { AppContext } from '../../App';
+import { categorizeSupportTicket } from '../../services/geminiService';
 
 interface AccordionItemProps {
     title: string;
@@ -27,6 +27,70 @@ const AccordionItem: React.FC<AccordionItemProps> = ({ title, children, isOpen, 
                     {children}
                 </div>
             </div>
+        </div>
+    );
+};
+
+const ContactSupportForm: React.FC = () => {
+    const context = useContext(AppContext);
+    const [message, setMessage] = useState('');
+    const [isLoading, setIsLoading] = useState(false);
+    const [result, setResult] = useState<{ category: string; sentiment: string } | null>(null);
+    const [error, setError] = useState('');
+
+    if (!context) return null;
+    const { translations } = context;
+
+    const handleSubmit = async (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!message.trim()) return;
+        
+        setIsLoading(true);
+        setResult(null);
+        setError('');
+
+        try {
+            const analysis = await categorizeSupportTicket(message);
+            if (analysis) {
+                setResult(analysis);
+                setMessage('');
+            } else {
+                setError('Failed to submit ticket. Please try again.');
+            }
+        } catch (err) {
+            setError('An error occurred.');
+        } finally {
+            setIsLoading(false);
+        }
+    };
+    
+    return (
+        <div className="mt-12 border-t dark:border-gray-700 pt-8">
+            <h2 className="text-3xl font-bold text-gray-800 dark:text-gray-100 mb-4 text-center">{translations.contact_support}</h2>
+            <form onSubmit={handleSubmit} className="space-y-4 max-w-lg mx-auto">
+                <textarea
+                    value={message}
+                    onChange={(e) => setMessage(e.target.value)}
+                    rows={5}
+                    placeholder={translations.your_message}
+                    className="w-full p-3 border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white rounded-md focus:outline-none focus:ring-2 focus:ring-primary"
+                    required
+                />
+                <button
+                    type="submit"
+                    disabled={isLoading}
+                    className="w-full bg-primary text-white py-3 px-4 rounded-md font-semibold hover:bg-blue-800 transition-colors disabled:bg-gray-400"
+                >
+                    {isLoading ? translations.generating : translations.submit_ticket}
+                </button>
+                {error && <p className="text-red-500 text-sm text-center">{error}</p>}
+                {result && (
+                    <div className="p-4 bg-green-100 dark:bg-green-900/50 border border-green-200 dark:border-green-700 rounded-md text-center">
+                        <p className="font-semibold text-green-800 dark:text-green-200">{translations.ticket_submitted_success}</p>
+                        <p className="text-sm text-green-700 dark:text-green-300">We've categorized your issue as: <span className="font-bold">{result.category}</span></p>
+                    </div>
+                )}
+            </form>
         </div>
     );
 };
@@ -84,6 +148,8 @@ export const HelpCenter: React.FC = () => {
                         </AccordionItem>
                     ))}
                 </div>
+
+                <ContactSupportForm />
             </div>
         </main>
     );

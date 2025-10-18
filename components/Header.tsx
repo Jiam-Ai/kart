@@ -1,12 +1,17 @@
-import React, { useContext } from 'react';
+import React, { useContext, useState, useEffect, useRef } from 'react';
 import { AppContext } from '../App';
-import type { Language, View } from '../types';
+import type { Language, View, Product } from '../types';
+import { getSearchSuggestions } from '../services/geminiService';
+import { CATEGORIES } from '../constants';
 
 interface HeaderProps {
     onSearch: (term: string) => void;
     onCartClick: () => void;
     currentView: View;
     onMenuClick: () => void;
+    onVisualSearchClick: () => void;
+    onVoiceSearch: () => void;
+    allProducts: Product[];
 }
 
 const ThemeToggle: React.FC = () => {
@@ -56,13 +61,88 @@ export const LanguageSwitcher: React.FC = () => {
     );
 };
 
-export const Header: React.FC<HeaderProps> = ({ onSearch, onCartClick, currentView, onMenuClick }) => {
+const AISearchSuggestions: React.FC<{ query: string; onSelect: (term: string) => void; }> = ({ query, onSelect }) => {
+    const [suggestions, setSuggestions] = useState<{ suggestions: string[]; didYouMean: string | null }>({ suggestions: [], didYouMean: null });
+    const [isLoading, setIsLoading] = useState(false);
     const context = useContext(AppContext);
+
+    useEffect(() => {
+        if (query.length < 3) {
+            setSuggestions({ suggestions: [], didYouMean: null });
+            return;
+        }
+
+        const handler = setTimeout(async () => {
+            setIsLoading(true);
+            const result = await getSearchSuggestions(query, CATEGORIES);
+            setSuggestions(result);
+            setIsLoading(false);
+        }, 500); // Debounce API call
+
+        return () => {
+            clearTimeout(handler);
+        };
+    }, [query]);
+
+    if (!context || (suggestions.suggestions.length === 0 && !suggestions.didYouMean)) {
+        return null;
+    }
+    const { translations } = context;
+
+    return (
+        <div className="absolute top-full left-0 right-0 mt-2 bg-white dark:bg-gray-800 rounded-md shadow-lg border dark:border-gray-700 p-4 z-10">
+            {isLoading && <p className="text-sm text-gray-500">Searching...</p>}
+            {!isLoading && (
+                <div className="space-y-3">
+                    {suggestions.didYouMean && (
+                        <button onClick={() => onSelect(suggestions.didYouMean!)} className="text-left w-full text-sm">
+                           <span className="text-gray-500 dark:text-gray-400">{translations.did_you_mean} </span>
+                           <span className="font-semibold text-primary dark:text-blue-400 italic hover:underline">{suggestions.didYouMean}</span>
+                        </button>
+                    )}
+                    {suggestions.suggestions.length > 0 && (
+                        <div>
+                             <h4 className="text-xs font-bold uppercase text-gray-400 dark:text-gray-500 mb-1">{translations.ai_search_suggestions}</h4>
+                             <ul className="space-y-1">
+                                {suggestions.suggestions.map(sugg => (
+                                    <li key={sugg}><button onClick={() => onSelect(sugg)} className="text-sm hover:underline text-gray-700 dark:text-gray-200">{sugg}</button></li>
+                                ))}
+                             </ul>
+                        </div>
+                    )}
+                </div>
+            )}
+        </div>
+    );
+};
+
+
+export const Header: React.FC<HeaderProps> = ({ onSearch, onCartClick, currentView, onMenuClick, onVisualSearchClick, onVoiceSearch, allProducts }) => {
+    const context = useContext(AppContext);
+    const [searchQuery, setSearchQuery] = useState('');
+    const [isSuggestionsOpen, setIsSuggestionsOpen] = useState(false);
+    const searchContainerRef = useRef<HTMLDivElement>(null);
+
+    useEffect(() => {
+        const handleClickOutside = (event: MouseEvent) => {
+            if (searchContainerRef.current && !searchContainerRef.current.contains(event.target as Node)) {
+                setIsSuggestionsOpen(false);
+            }
+        };
+        document.addEventListener("mousedown", handleClickOutside);
+        return () => document.removeEventListener("mousedown", handleClickOutside);
+    }, []);
+
     if (!context) return null;
 
     const { cart, translations, currentSeller, currentBuyer, logout, handleNavigation } = context;
     const cartItemCount = cart.reduce((sum, item) => sum + item.quantity, 0);
     const isShopView = currentView === 'shop';
+
+    const handleSearchChange = (term: string) => {
+        setSearchQuery(term);
+        onSearch(term);
+    };
     
     return (
         <header className="bg-primary dark:bg-gray-800 shadow-md sticky top-0 z-50">
@@ -81,7 +161,7 @@ export const Header: React.FC<HeaderProps> = ({ onSearch, onCartClick, currentVi
                 </div>
 
                 {isShopView && (
-                    <div className="flex-1 max-w-xl mx-4 hidden lg:flex items-center bg-white dark:bg-gray-700 rounded-full px-4">
+                    <div ref={searchContainerRef} className="flex-1 max-w-xl mx-4 hidden lg:flex relative items-center bg-white dark:bg-gray-700 rounded-full px-4">
                         <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-gray-400 dark:text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
                         </svg>
@@ -89,8 +169,17 @@ export const Header: React.FC<HeaderProps> = ({ onSearch, onCartClick, currentVi
                             type="text"
                             placeholder={translations.search_placeholder}
                             className="w-full bg-transparent p-2 text-gray-700 dark:text-gray-200 focus:outline-none"
-                            onChange={(e) => onSearch(e.target.value)}
+                            value={searchQuery}
+                            onChange={(e) => handleSearchChange(e.target.value)}
+                            onFocus={() => setIsSuggestionsOpen(true)}
                         />
+                         <button onClick={onVoiceSearch} className="p-1 text-gray-500 dark:text-gray-400 hover:text-primary dark:hover:text-blue-400" aria-label="Search by voice">
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" /></svg>
+                        </button>
+                        <button onClick={onVisualSearchClick} className="p-1 text-gray-500 dark:text-gray-400 hover:text-primary dark:hover:text-blue-400" aria-label="Search by image">
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
+                        </button>
+                        {isSuggestionsOpen && <AISearchSuggestions query={searchQuery} onSelect={(term) => { handleSearchChange(term); setIsSuggestionsOpen(false); }} />}
                     </div>
                 )}
                 <div className="flex items-center space-x-2 sm:space-x-4">
@@ -174,6 +263,12 @@ export const Header: React.FC<HeaderProps> = ({ onSearch, onCartClick, currentVi
                             className="w-full bg-transparent p-2 text-gray-700 dark:text-gray-200 focus:outline-none"
                             onChange={(e) => onSearch(e.target.value)}
                         />
+                         <button onClick={onVoiceSearch} className="p-1 text-gray-500 dark:text-gray-400" aria-label="Search by voice">
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" /></svg>
+                        </button>
+                        <button onClick={onVisualSearchClick} className="p-1 text-gray-500 dark:text-gray-400" aria-label="Search by image">
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
+                        </button>
                     </div>
                 </div>
             )}

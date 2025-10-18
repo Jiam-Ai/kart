@@ -18,37 +18,35 @@ const fetchTrackingInfo = (orderId: string): Promise<any> => {
           reject(new Error('Order not found'));
           return;
         }
-
-        // Generate dynamic, realistic tracking history based on order date
-        const history = [];
-        const now = new Date();
-        const orderDate = new Date(foundOrder.date);
         
-        history.push({ status: 'Order Placed', time: orderDate });
+        const history = [];
+        const orderDate = new Date(foundOrder.date);
         let currentStatus = 'Order Placed';
         
+        // Build history based on the deterministic order status
+        history.push({ status: 'Order Placed', time: orderDate });
+
         const confirmedDate = new Date(orderDate.getTime() + 5 * 60 * 1000); // +5 min
-        if (now >= confirmedDate) {
-          history.push({ status: 'Order Confirmed', time: confirmedDate });
-          currentStatus = 'Order Confirmed';
+        history.push({ status: 'Order Confirmed', time: confirmedDate });
+        currentStatus = 'Order Confirmed';
+
+        if (foundOrder.status === 'Shipped' || foundOrder.status === 'Delivered' || foundOrder.status === 'Completed') {
+            const shippedDate = new Date(confirmedDate.getTime() + (2 + Math.random()) * 60 * 60 * 1000); // +2-3 hours
+            history.push({ status: 'Shipped from Vendor', time: shippedDate });
+            currentStatus = 'Shipped from Vendor';
         }
 
-        const shippedDate = new Date(orderDate.getTime() + (4 + Math.random() * 4) * 60 * 60 * 1000); // +4-8 hours
-        if (now >= shippedDate) {
-          history.push({ status: 'Shipped from Vendor', time: shippedDate });
-          currentStatus = 'Shipped from Vendor';
-        }
-        
-        const outForDeliveryDate = new Date(shippedDate.getTime() + (12 + Math.random() * 8) * 60 * 60 * 1000); // +12-20 hours after shipping
-        if (now >= outForDeliveryDate) {
-           history.push({ status: 'Out for Delivery', time: outForDeliveryDate });
-           currentStatus = 'Out for Delivery';
-        }
-        
-        const deliveredDate = new Date(outForDeliveryDate.getTime() + (2 + Math.random() * 6) * 60 * 60 * 1000); // +2-8 hours after out for delivery
-        if (now >= deliveredDate) {
+        if (foundOrder.status === 'Delivered' || foundOrder.status === 'Completed') {
+           const deliveredDate = new Date(orderDate.getTime() + (24 + Math.random() * 8) * 60 * 60 * 1000); // +24-32 hours after order
+           history.push({ status: 'Out for Delivery', time: new Date(deliveredDate.getTime() - 2 * 60 * 60 * 1000) }); // 2 hours before
            history.push({ status: 'Delivered', time: deliveredDate });
            currentStatus = 'Delivered';
+        }
+        
+        if (foundOrder.status === 'Completed') {
+           const completedDate = new Date(orderDate.getTime() + (30 + Math.random() * 8) * 60 * 60 * 1000); // Sometime after delivery
+           history.push({ status: 'Receipt Confirmed by Buyer', time: completedDate });
+           currentStatus = 'Completed';
         }
 
         resolve({
@@ -97,7 +95,7 @@ const TrackingStatus: React.FC<TrackingStatusProps> = ({ status, time, isCurrent
 );
 
 const ProgressBar: React.FC<{ currentStatus: string }> = ({ currentStatus }) => {
-    const steps = ['Order Placed', 'Order Confirmed', 'Shipped from Vendor', 'Out for Delivery', 'Delivered'];
+    const steps = ['Order Confirmed', 'Shipped', 'Delivered', 'Completed'];
     const currentStepIndex = steps.indexOf(currentStatus);
     const activeIndex = currentStepIndex === -1 ? 0 : currentStepIndex;
 

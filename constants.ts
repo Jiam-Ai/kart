@@ -1,4 +1,4 @@
-import type { Product, Language, Order } from './types';
+import type { Product, Language, Order, BuyerQuest } from './types';
 
 export const CATEGORIES: string[] = [
     'All', 'Electronics', 'Clothing', 'Groceries', 'Mobile Phones', 'Beauty & Health'
@@ -25,7 +25,6 @@ export const MOCK_PRODUCTS: Product[] = [
         price: 850,
         originalPrice: 1200,
         stock: 8,
-        saleEndDate: new Date(Date.now() + 2 * 24 * 60 * 60 * 1000).toISOString(), // Ends in 2 days
         images: ['https://picsum.photos/seed/hp/400/400', 'https://picsum.photos/seed/hp2/400/400', 'https://picsum.photos/seed/hp3/400/400'], 
         category: 'Electronics', 
         rating: 4.8, 
@@ -45,7 +44,9 @@ export const MOCK_PRODUCTS: Product[] = [
         reviews: [
             { author: 'Amara', rating: 5, comment: 'Best headphones I have ever owned! The noise cancellation is superb.', date: '2023-10-15' },
             { author: 'Isata', rating: 4, comment: 'Great sound quality and very comfortable to wear for long hours.', date: '2023-10-12' },
-        ]
+        ],
+        isNegotiable: true,
+        minPrice: 780,
     },
     { 
         id: 2, 
@@ -80,7 +81,7 @@ export const MOCK_PRODUCTS: Product[] = [
              { author: 'John', rating: 5, comment: 'Perfect fit and very soft material. Will buy again!', date: '2023-09-20' },
         ]
     },
-    { id: 3, name: 'Organic Brown Rice (5kg)', description: 'Healthy and nutritious organic brown rice for your family.', price: 250, stock: 100, images: ['https://picsum.photos/seed/rice/400/400'], category: 'Groceries', rating: 4.9, reviewsCount: 88, vendor: 'Salone Fresh Mart', sellerId: 'system' },
+    { id: 3, name: 'Organic Brown Rice (5kg)', description: 'Healthy and nutritious organic brown rice for your family.', price: 250, stock: 100, images: ['https://picsum.photos/seed/rice/400/400'], category: 'Groceries', rating: 4.9, reviewsCount: 88, vendor: 'Salone Fresh Mart', sellerId: 'system', isSubscribable: true },
     { 
         id: 4, 
         name: 'Latest Smartphone Model X', 
@@ -88,15 +89,16 @@ export const MOCK_PRODUCTS: Product[] = [
         price: 3900, 
         originalPrice: 4500,
         stock: 25,
-        saleEndDate: new Date(Date.now() + 1 * 24 * 60 * 60 * 1000 + 3 * 60 * 60 * 1000).toISOString(), // Ends in 1 day 3 hours
         images: ['https://picsum.photos/seed/phone/400/400', 'https://picsum.photos/seed/phone2/400/400'], 
         category: 'Mobile Phones', 
         rating: 4.7, 
         reviewsCount: 190, 
         vendor: 'Mobile Hub', 
-        sellerId: 'system' 
+        sellerId: 'system',
+        isNegotiable: true,
+        minPrice: 3750,
     },
-    { id: 5, name: 'Shea Butter Body Lotion', description: 'Nourish your skin with this natural shea butter body lotion.', price: 95, stock: 80, images: ['https://picsum.photos/seed/lotion/400/400'], category: 'Beauty & Health', rating: 4.9, reviewsCount: 310, vendor: 'Mama Salone Beauty', sellerId: 'system' },
+    { id: 5, name: 'Shea Butter Body Lotion', description: 'Nourish your skin with this natural shea butter body lotion.', price: 95, stock: 80, images: ['https://picsum.photos/seed/lotion/400/400'], category: 'Beauty & Health', rating: 4.9, reviewsCount: 310, vendor: 'Mama Salone Beauty', sellerId: 'system', isSubscribable: true },
     { id: 6, name: 'Bluetooth Speaker Portable', description: 'Take your music anywhere with this compact and powerful bluetooth speaker.', price: 450, stock: 40, images: ['https://picsum.photos/seed/speaker/400/400'], category: 'Electronics', rating: 4.6, reviewsCount: 155, vendor: 'TechSavvy SL', sellerId: 'system' },
     { 
         id: 7, 
@@ -105,15 +107,16 @@ export const MOCK_PRODUCTS: Product[] = [
         price: 320,
         originalPrice: 400,
         stock: 5,
-        saleEndDate: new Date(Date.now() + 5 * 60 * 60 * 1000).toISOString(), // Ends in 5 hours
         images: ['https://picsum.photos/seed/dress/400/400', 'https://picsum.photos/seed/dress2/400/400'], 
         category: 'Clothing', 
         rating: 4.8, 
         reviewsCount: 95, 
         vendor: 'Freetown Fashion', 
-        sellerId: 'system'
+        sellerId: 'system',
+        isNegotiable: true,
+        minPrice: 290,
     },
-    { id: 8, name: 'Groundnut Paste (500g)', description: 'Locally made, delicious groundnut paste. Perfect for sauces.', price: 60, stock: 200, images: ['https://picsum.photos/seed/paste/400/400'], category: 'Groceries', rating: 5.0, reviewsCount: 200, vendor: 'Salone Fresh Mart', sellerId: 'system' }
+    { id: 8, name: 'Groundnut Paste (500g)', description: 'Locally made, delicious groundnut paste. Perfect for sauces.', price: 60, stock: 200, images: ['https://picsum.photos/seed/paste/400/400'], category: 'Groceries', rating: 5.0, reviewsCount: 200, vendor: 'Salone Fresh Mart', sellerId: 'system', isSubscribable: true }
 ];
 
 export const MOCK_ORDERS: Order[] = [
@@ -139,7 +142,8 @@ export const MOCK_ORDERS: Order[] = [
             }
         ],
         total: MOCK_PRODUCTS.find(p => p.id === 1)!.price * 1 + MOCK_PRODUCTS.find(p => p.id === 3)!.price * 2,
-        buyerId: 'buyer-demo-1'
+        buyerId: 'buyer-demo-1',
+        status: 'Delivered',
     },
     {
         id: 'SK-1700000000500',
@@ -157,8 +161,15 @@ export const MOCK_ORDERS: Order[] = [
             }
         ],
         total: MOCK_PRODUCTS.find(p => p.id === 5)!.price * 1,
-        buyerId: 'buyer-demo-1'
+        buyerId: 'buyer-demo-1',
+        status: 'Completed',
     }
+];
+
+export const MOCK_QUESTS: BuyerQuest[] = [
+    { id: 'q1', title: 'First Review', description: 'Write your first product review.', points: 50, isCompleted: false },
+    { id: 'q2', title: 'Explorer', description: 'View products from 3 different categories.', points: 75, isCompleted: false },
+    { id: 'q3', title: 'Social Sharer', description: 'Share a product on social media.', points: 100, isCompleted: false },
 ];
 
 export const LOCAL_STORAGE_KEYS = {
@@ -167,6 +178,7 @@ export const LOCAL_STORAGE_KEYS = {
     PRODUCTS: 'sellerProducts',
     ORDERS: 'salonekart_orders',
     THEME: 'theme',
+    BROWSING_HISTORY: 'salonekart_browsing_history',
 };
 
 export const SESSION_STORAGE_KEYS = {
@@ -189,7 +201,7 @@ export const TRANSLATIONS: Record<Language, Record<string, string>> = {
         'vendor_ai_assistant': 'Vendor AI Assistant',
         'ai_description': 'Generate a compelling product description with AI!',
         'product_keywords': 'Enter product keywords (e.g., "red leather handbag")',
-        'generate_description': 'Generate Description',
+        'generate_description': 'Generate',
         'generating': 'Generating...',
         'shopping_cart': 'Shopping Cart',
         'shopping': 'Shopping',
@@ -210,6 +222,10 @@ export const TRANSLATIONS: Record<Language, Record<string, string>> = {
         'syllogy_mobile_money': 'Syllogy Mobile Money',
         'natcom_top_up': 'NatCom Top Up',
         'place_order': 'Place Order',
+        'order_placed_success_title': 'Order Placed Successfully!',
+        'order_placed_success_desc': "Thank you for your purchase. You can track the status of your order below.",
+        'your_order_id': 'Your Order ID is:',
+        'continue_shopping': 'Continue Shopping',
         'close': 'Close',
         'english': 'English',
         'krio': 'Krio',
@@ -235,6 +251,7 @@ export const TRANSLATIONS: Record<Language, Record<string, string>> = {
         'order_id': 'Order ID',
         'date': 'Date',
         'total': 'Total',
+        'status': 'Status',
         'buyer_information': 'Buyer Information',
         'items_in_order': 'Items in this Order',
         'fill_all_fields': 'Please fill out all fields and upload at least one image.',
@@ -322,6 +339,63 @@ export const TRANSLATIONS: Record<Language, Record<string, string>> = {
         'all_ratings': 'All Ratings',
         'four_stars_up': '4 Stars & Up',
         'three_stars_up': '3 Stars & Up',
+        'visual_search_title': 'Search by Image',
+        'upload_image_prompt': 'Upload a photo to find similar products.',
+        'finding_similar_products': 'Scanning for similar items...',
+        'no_similar_products': 'No similar products found. Try a different image.',
+        'virtual_try_on': 'Virtual Try-On',
+        'try_on_prompt': 'Upload a full-body photo to see how this looks on you.',
+        'generating_preview': 'Generating your preview...',
+        'subscribe_and_save': 'Subscribe & Save',
+        'subscribe_prompt': 'Save 10% with monthly delivery.',
+        'one_time_purchase': 'One-time purchase',
+        'subscription': 'Subscription',
+        'my_rewards': 'My Rewards',
+        'loyalty_program_title': 'Loyalty Program',
+        'points_balance': 'Your Points Balance',
+        'your_tier': 'Your Tier',
+        'bronze': 'Bronze',
+        'silver': 'Silver',
+        'gold': 'Gold',
+        'how_to_earn': 'How to Earn Points',
+        'earn_points_desc': 'Earn 1 point for every SLL 10 you spend!',
+        'upload_review_image': 'Upload Photo',
+        'review_summary': 'Review Summary by AI',
+        'summarizing_reviews': 'Summarizing reviews...',
+        'shop_the_look': 'Shop the Look',
+        'contact_support': 'Contact Support',
+        'your_message': 'Your Message',
+        'submit_ticket': 'Submit Ticket',
+        'ticket_submitted_success': 'Your support ticket has been submitted!',
+        'ai_search_suggestions': 'Suggestions',
+        'did_you_mean': 'Did you mean:',
+        // New keys for 5 unique features
+        'make_an_offer': 'Make an Offer',
+        'price_negotiation': 'Price Negotiation',
+        'negotiation_greeting': "Let's make a deal! What's your best offer?",
+        'negotiation_placeholder': 'Enter your offer price...',
+        'offer_accepted': 'Offer Accepted!',
+        'voice_search_prompt': 'Speak in Krio to search for products...\n(e.g., "Show me red shirt")',
+        'for_you': 'For You',
+        'all_products': 'All Products',
+        'personalized_recommendations': 'Personalized Recommendations',
+        'vendor_spotlight': 'Vendor Spotlight',
+        'my_story': 'My Story',
+        'tell_us_your_story': 'Tell Us Your Story',
+        'story_prompt': 'Enter a few bullet points about your business, your craft, or what makes your products special. Our AI will turn it into a beautiful story for our homepage!',
+        'generate_story': 'Generate My Story',
+        'loyalty_and_quests': 'Loyalty & Quests',
+        'your_quests': 'Your Quests',
+        'completed': 'Completed',
+        'get_new_quests': 'Get New Quests',
+        // Order Confirmation
+        'confirm_receipt': 'Confirm Receipt',
+        'mark_as_shipped': 'Mark as Shipped',
+        'mark_as_delivered': 'Mark as Delivered',
+        'status_pending': 'Pending',
+        'status_shipped': 'Shipped',
+        'status_delivered': 'Delivered',
+        'status_completed': 'Completed',
     },
     krio: {
         'search_placeholder': 'Luk fo tin dɛn...',
@@ -337,7 +411,7 @@ export const TRANSLATIONS: Record<Language, Record<string, string>> = {
         'vendor_ai_assistant': 'Vɛnda AI Asist',
         'ai_description': 'Mek AI rayt fayn diskripshɔn fɔ yu prodɔkt!',
         'product_keywords': 'Put di prodɔkt in kiwɔd (ɛg "rɛd lɛda anbag")',
-        'generate_description': 'Mek Diskripshɔn',
+        'generate_description': 'Mek Am',
         'generating': 'I de mek am...',
         'shopping_cart': 'Shɔpin Kat',
         'shopping': 'Shɔpin',
@@ -383,6 +457,7 @@ export const TRANSLATIONS: Record<Language, Record<string, string>> = {
         'order_id': 'Ɔda ID',
         'date': 'Det',
         'total': 'Total',
+        'status': 'Status',
         'buyer_information': 'Infɔmeshɔn fɔ di Pɔsin we Bay',
         'items_in_order': 'Tin dɛn insay dis Ɔda',
         'fill_all_fields': 'Plis, rayt ɔl di tin dɛn na di bɔks dɛn ɛn put at list wan pikchɔ.',

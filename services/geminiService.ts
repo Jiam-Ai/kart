@@ -1,16 +1,29 @@
-
-import { GoogleGenAI, Type, Chat } from "@google/genai";
-import type { Product } from '../types';
+import { GoogleGenAI, Type, Chat, Modality, FunctionDeclaration, GenerateContentResponse } from "@google/genai";
+// FIX: Import 'BuyerQuest' type to resolve 'Cannot find name' errors.
+import type { Product, Review, NegotiationMessage, Buyer, BuyerQuest } from '../types';
 
 const API_KEY = process.env.API_KEY;
 
 if (!API_KEY) {
-  // This is a fallback for the development environment where process.env might not be configured.
-  // In a real production build, the key should always be present.
   console.warn("API_KEY is not set. AI features will be disabled.");
 }
 
 const ai = new GoogleGenAI({ apiKey: API_KEY! });
+
+// --- Helper Functions ---
+const blobToBase64 = (blob: Blob): Promise<string> => {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onloadend = () => {
+            const base64String = (reader.result as string).split(',')[1];
+            resolve(base64String);
+        };
+        reader.onerror = reject;
+        reader.readAsDataURL(blob);
+    });
+};
+
+// --- Existing AI Functions ---
 
 export const generateProductDescription = async (keywords: string): Promise<string> => {
   if (!API_KEY) {
@@ -37,31 +50,110 @@ export const generateProductDescription = async (keywords: string): Promise<stri
   }
 };
 
-export const getRelatedProductIds = async (currentProduct: Product, allProducts: Product[]): Promise<number[]> => {
+// --- New Advanced AI Functions ---
+
+export const findSimilarProductsByImage = async (image: { inlineData: { data: string; mimeType: string; } }, allProducts: Product[]): Promise<number[]> => {
     if (!API_KEY) return [];
 
-    const otherProducts = allProducts
-        .filter(p => p.id !== currentProduct.id)
-        .map(p => ({ id: p.id, name: p.name, category: p.category, description: p.description.substring(0, 100) }));
+    const productCatalog = allProducts.map(p => ({ id: p.id, name: p.name, category: p.category, description: p.description.substring(0, 100) }));
 
-    if (otherProducts.length === 0) return [];
-    
-    const prompt = `
-        You are a product recommendation engine for an e-commerce site in Sierra Leone called SaloneKart.
-        Based on the current product, find the 3 most relevantly similar products from the provided list.
-        Consider the product name, category, and description for relevance.
+    const textPart = {
+        text: `You are a visual search engine for an e-commerce site in Sierra Leone. Based on the provided image, find the 5 most visually and stylistically similar products from the following JSON product catalog. Prioritize visual similarity. Return a JSON object with a single key "similar_ids" which is an array of the top 5 most relevant product IDs. Example: {"similar_ids": [12, 34, 56, 78, 90]}\n\nProduct Catalog:\n${JSON.stringify(productCatalog)}`
+    };
+
+    try {
+        const response = await ai.models.generateContent({
+            model: 'gemini-2.5-flash',
+            contents: { parts: [image, textPart] },
+            config: {
+                responseMimeType: 'application/json',
+                responseSchema: {
+                    type: Type.OBJECT,
+                    properties: {
+                        similar_ids: { type: Type.ARRAY, items: { type: Type.NUMBER } }
+                    }
+                }
+            }
+        });
+
+        const result = JSON.parse(response.text.trim());
+        return result.similar_ids || [];
+    } catch (error) {
+        console.error("Error finding similar products by image:", error);
+        return [];
+    }
+};
+
+export const generateVirtualTryOnImage = async (userImage: Blob, product: Product): Promise<string | null> => {
+    if (!API_KEY) return null;
+
+    try {
+        const userImageBase64 = await blobToBase64(userImage);
         
-        Current Product:
-        - Name: ${currentProduct.name}
-        - Category: ${currentProduct.category}
-        - Description: ${currentProduct.description}
+        // In a real scenario, we might use a product image with a transparent background.
+        // For this demo, we'll use the first product image and instruct the model.
+        const productImageResponse = await fetch(product.images[0]);
+        const productImageBlob = await productImageResponse.blob();
+        const productImageBase64 = await blobToBase64(productImageBlob);
 
-        List of Other Products (JSON format):
-        ${JSON.stringify(otherProducts, null, 2)}
+        const response = await ai.models.generateContent({
+            model: 'gemini-2.5-flash-image',
+            contents: {
+                parts: [
+                    { inlineData: { data: userImageBase64, mimeType: userImage.type } },
+                    { inlineData: { data: productImageBase64, mimeType: productImageBlob.type } },
+                    { text: `Realistically place the clothing item from the second image onto the person in the first image. The clothing item is a "${product.name}". Preserve the background and the person's pose.` },
+                ],
+            },
+            config: {
+                responseModalities: [Modality.IMAGE],
+            },
+        });
+        
+        for (const part of response.candidates[0].content.parts) {
+            if (part.inlineData) {
+                return part.inlineData.data;
+            }
+        }
+        return null;
 
-        Return a JSON object with a single key "related_ids" which is an array of the top 3 most relevant product IDs. For example: {"related_ids": [12, 34, 56]}
+    } catch (error) {
+        console.error("Error generating virtual try-on image:", error);
+        return null;
+    }
+};
+
+export const summarizeProductReviews = async (reviews: Review[]): Promise<string> => {
+    if (!API_KEY || reviews.length === 0) return "No summary available.";
+
+    const reviewsText = reviews.map(r => `- ${r.comment} (Rating: ${r.rating}/5)`).join('\n');
+    const prompt = `You are an e-commerce AI assistant. Summarize the following customer reviews for a product into a concise "Pros & Cons" list. Be objective and extract key themes.\n\nReviews:\n${reviewsText}\n\nSummary:`;
+
+    try {
+        const response = await ai.models.generateContent({
+            model: 'gemini-2.5-flash',
+            contents: prompt,
+            config: { maxOutputTokens: 150 }
+        });
+        return response.text.trim();
+    } catch (error) {
+        console.error("Error summarizing reviews:", error);
+        return "Could not generate summary.";
+    }
+};
+
+export const categorizeSupportTicket = async (message: string): Promise<{ category: string, sentiment: string } | null> => {
+    if (!API_KEY) return null;
+
+    const prompt = `Analyze the following customer support message for an e-commerce store. Categorize it and determine its sentiment.
+    
+    Categories: "Delivery", "Payment", "Return", "Product Inquiry", "Account Issue", "Other"
+    Sentiment: "Positive", "Neutral", "Negative"
+
+    Message: "${message}"
+
+    Return the result as a JSON object.
     `;
-
     try {
         const response = await ai.models.generateContent({
             model: 'gemini-2.5-flash',
@@ -71,38 +163,246 @@ export const getRelatedProductIds = async (currentProduct: Product, allProducts:
                 responseSchema: {
                     type: Type.OBJECT,
                     properties: {
-                        related_ids: {
-                            type: Type.ARRAY,
-                            items: { type: Type.NUMBER }
+                        category: { type: Type.STRING },
+                        sentiment: { type: Type.STRING }
+                    }
+                }
+            }
+        });
+        return JSON.parse(response.text.trim());
+    } catch (error) {
+        console.error("Error categorizing support ticket:", error);
+        return null;
+    }
+};
+
+export const getSearchSuggestions = async (query: string, categories: string[]): Promise<{ suggestions: string[], didYouMean: string | null }> => {
+    if (!API_KEY || !query) return { suggestions: [], didYouMean: null };
+
+    const prompt = `You are a helpful search assistant for an e-commerce site.
+    Given the user's search query, provide helpful suggestions.
+    
+    1. Check for a likely typo. If you find one, suggest a correction.
+    2. Suggest up to 3 relevant categories from the provided list that might contain what the user is looking for.
+    3. Suggest up to 2 related search terms.
+
+    User Query: "${query}"
+    Available Categories: ${categories.join(', ')}
+
+    Return a JSON object with two keys: "didYouMean" (string or null) and "suggestions" (an array of strings).
+    `;
+    try {
+        const response = await ai.models.generateContent({
+            model: 'gemini-2.5-flash',
+            contents: prompt,
+            config: {
+                responseMimeType: 'application/json',
+                responseSchema: {
+                    type: Type.OBJECT,
+                    properties: {
+                        didYouMean: { type: Type.STRING, nullable: true },
+                        suggestions: { type: Type.ARRAY, items: { type: Type.STRING } }
+                    }
+                }
+            }
+        });
+        return JSON.parse(response.text.trim());
+    } catch (error) {
+        console.error("Error getting search suggestions:", error);
+        return { suggestions: [], didYouMean: null };
+    }
+};
+
+// --- 5 New Differentiating AI Features ---
+
+export const handlePriceNegotiation = async (
+    product: Product,
+    history: NegotiationMessage[]
+): Promise<NegotiationMessage> => {
+    const systemInstruction = `You are an AI negotiation agent for SaloneKart. You are friendly, a bit witty, and a firm but fair negotiator, using Sierra Leonean Krio phrases.
+    - Product: ${product.name}
+    - Listing Price: SLL ${product.price}
+    - Your minimum acceptable price (secret): SLL ${product.minPrice}
+    - Your goal is to meet the user's offer as close to the listing price as possible, but you must not go below your minimum price.
+    - If the user's offer is below your minimum, make a counter-offer that is higher but still a good deal.
+    - When you reach an agreement, your final message must include the text "Offer Accepted!" and the final price.
+    - Be conversational. Use phrases like "Ah, my friend!", "How de body?", "Make we talk business.", "That price is too small-o!".
+    `;
+    const chat = ai.chats.create({ model: 'gemini-2.5-flash', config: { systemInstruction, temperature: 0.8 } });
+    
+    const contents = history.map(m => ({
+        role: m.sender === 'user' ? 'user' : 'model',
+        parts: [{ text: m.text }]
+    }));
+
+    try {
+        const response = await chat.sendMessage({ history: contents, message: history[history.length - 1].text });
+        
+        const responseText = response.text;
+        const acceptedMatch = responseText.match(/Offer Accepted!.*?(\d+)/);
+        
+        if (acceptedMatch) {
+            return { sender: 'bot', text: responseText, isFinal: true, offer: parseInt(acceptedMatch[1], 10) };
+        }
+        
+        return { sender: 'bot', text: responseText, isFinal: false };
+    } catch (error) {
+        console.error("Error in negotiation AI:", error);
+        return { sender: 'bot', text: "Sorry, I'm having trouble with the connection. Let's try again.", isFinal: false };
+    }
+};
+
+export const generateVendorStory = async (storeName: string, bulletPoints: string): Promise<string> => {
+    if (!API_KEY) return "AI service is unavailable.";
+    const prompt = `You are a brilliant storyteller for SaloneKart's "Vendor Spotlight".
+    Write a short, heartwarming, and engaging story (2-3 paragraphs) about a local Sierra Leonean vendor.
+    Use the following information to craft the narrative. Make it sound authentic and inspiring.
+    
+    - Store Name: ${storeName}
+    - Key Points: ${bulletPoints}
+    
+    The story should highlight their passion, craft, and connection to the community.`;
+    
+    const response = await ai.models.generateContent({ model: 'gemini-2.5-flash', contents: prompt, config: { temperature: 0.7 }});
+    return response.text.trim();
+};
+
+export const getPersonalizedRecommendations = async (browsingHistory: number[], allProducts: Product[]): Promise<number[]> => {
+    if (!API_KEY || browsingHistory.length === 0) return [];
+    
+    const viewedProducts = allProducts.filter(p => browsingHistory.includes(p.id))
+        .map(p => ({ id: p.id, name: p.name, category: p.category }));
+    
+    const productCatalog = allProducts.filter(p => !browsingHistory.includes(p.id))
+        .map(p => ({ id: p.id, name: p.name, category: p.category, description: p.description.substring(0, 100) }));
+
+    const prompt = `You are a personalization engine for an e-commerce site.
+    Based on the user's browsing history, recommend up to 10 other products from the catalog that they would most likely be interested in.
+    Prioritize products in similar categories but also suggest complementary items.
+    
+    User Browsing History:
+    ${JSON.stringify(viewedProducts)}
+    
+    Full Product Catalog (for recommendations):
+    ${JSON.stringify(productCatalog)}
+    
+    Return a JSON object with a single key "recommended_ids", which is an array of product IDs.`;
+
+    try {
+        const response = await ai.models.generateContent({
+            model: 'gemini-2.5-flash',
+            contents: prompt,
+            config: {
+                responseMimeType: "application/json",
+                responseSchema: {
+                    type: Type.OBJECT,
+                    properties: { recommended_ids: { type: Type.ARRAY, items: { type: Type.NUMBER } } }
+                }
+            }
+        });
+        const result = JSON.parse(response.text.trim());
+        return result.recommended_ids || [];
+    } catch (error) {
+        console.error("Error getting recommendations:", error);
+        return [];
+    }
+};
+
+export const generateNewQuests = async (buyer: Buyer): Promise<BuyerQuest[]> => {
+    if (!API_KEY) return [];
+
+    const prompt = `You are a gamification expert for SaloneKart.
+    Generate 2 new, personalized quests for this user to encourage engagement.
+    Do not suggest quests they have already completed.
+    
+    User Profile:
+    - Completed Quests: ${JSON.stringify(buyer.quests.filter(q => q.isCompleted))}
+    - Recent Purchases: (Not available, focus on general engagement)
+    
+    Available Quest Types:
+    - Review a recent purchase.
+    - Try the visual search feature.
+    - Share a product with a friend.
+    - Add an item to their wishlist.
+    - Explore a new category they haven't bought from.
+    - Try to negotiate a price on an item.
+    
+    Return a JSON array of quest objects. Each object must have "id", "title", "description", and "points".`;
+    
+    try {
+        const response = await ai.models.generateContent({
+            model: 'gemini-2.5-flash',
+            contents: prompt,
+            config: {
+                responseMimeType: "application/json",
+                responseSchema: {
+                    type: Type.ARRAY,
+                    items: {
+                        type: Type.OBJECT,
+                        properties: {
+                            id: { type: Type.STRING },
+                            title: { type: Type.STRING },
+                            description: { type: Type.STRING },
+                            points: { type: Type.NUMBER },
                         }
                     }
                 }
             }
         });
-
-        const jsonString = response.text.trim();
-        const result = JSON.parse(jsonString);
-        return result.related_ids || [];
+        const newQuests: Omit<BuyerQuest, 'isCompleted'>[] = JSON.parse(response.text.trim());
+        return newQuests.map(q => ({ ...q, isCompleted: false }));
     } catch (error) {
-        console.error("Error getting related products from Gemini:", error);
+        console.error("Error generating new quests:", error);
         return [];
     }
 };
 
+export const processKrioVoiceCommand = async (command: string): Promise<GenerateContentResponse> => {
+     const tools: FunctionDeclaration[] = [
+        {
+            name: 'search_products',
+            parameters: {
+                type: Type.OBJECT,
+                properties: { query: { type: Type.STRING, description: 'The user\'s search term' } },
+                required: ['query'],
+            },
+        },
+        {
+            name: 'add_to_cart',
+            parameters: {
+                type: Type.OBJECT,
+                properties: { productName: { type: Type.STRING, description: 'The name of the product to add to the cart' } },
+                required: ['productName'],
+            },
+        },
+    ];
+
+    const response = await ai.models.generateContent({
+      model: 'gemini-2.5-flash',
+      contents: `You are a voice assistant for an e-commerce app in Sierra Leone. The user is speaking Krio. Interpret their command and call the appropriate function. Command: "${command}"`,
+      config: {
+        tools: [{ functionDeclarations: tools }],
+      },
+    });
+    
+    return response;
+};
+
+
 export const createChatSession = (): Chat => {
-    const systemInstruction = `You are a friendly and helpful customer service chatbot for SaloneKart, an e-commerce marketplace in Sierra Leone. Your name is Kadi.
-    Your knowledge base consists ONLY of the following information:
-    - **Payment Methods**: We accept Cash on Delivery, Orange Money, and Africell Money.
-    - **Delivery**: We deliver to all parts of Sierra Leone. Customers can track their orders on the 'Track Your Order' page using their Order ID.
-    - **Becoming a Seller**: Anyone can become a seller by clicking 'Seller Login' and then 'Sign Up'. The 'Vendor Hub' has resources and guides to help sellers succeed.
-    - **Product Categories**: We sell a wide range of products including Electronics, Clothing, Groceries, Mobile Phones, and Beauty & Health items.
-    - **Return Policy**: We have a 7-day return policy. Items must be unused and in their original packaging. Customers should contact support via the 'Help Center' page to start a return.
+    const systemInstruction = `You are Kadi, a friendly, witty, and extremely helpful personal shopping assistant for SaloneKart, an e-commerce marketplace in Sierra Leone.
+    
+    Your goal is to help users discover products and have a delightful shopping experience. You are a fashion and tech expert.
     
     Your instructions:
-    - Be friendly, conversational, and concise. Use Sierra Leonean greetings like "Kushe!" or "How de body?" where appropriate.
-    - If a user asks a question you cannot answer from your knowledge base, politely say "I'm sorry, I can only answer questions about SaloneKart's services like payments, delivery, and returns. Is there anything else I can help with?"
-    - Do not make up information.
-    - Keep your answers short and to the point.`;
+    - Be conversational and engaging. Use Sierra Leonean greetings like "Kushe!" or "How de body?"
+    - Proactively ask questions to understand the user's needs. E.g., "What's the occasion?", "What's your budget?".
+    - When a user asks for recommendations (e.g., "find me a dress"), use the provided Product Context to suggest specific product names.
+    - If the user asks a general customer service question (payment, delivery, returns), use the following knowledge base:
+        - **Payment Methods**: We accept Cash on Delivery, Orange Money, and Africell Money.
+        - **Delivery**: We deliver nationwide in Sierra Leone. Orders can be tracked on the 'Track Your Order' page.
+        - **Return Policy**: We have a 7-day return policy for unused items in original packaging.
+    - If you cannot answer, politely say: "That's a bit outside my expertise, but our human support team can help! You can find a contact form in our Help Center."`;
 
     return ai.chats.create({
         model: 'gemini-2.5-flash',

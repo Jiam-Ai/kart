@@ -1,4 +1,5 @@
 
+
 import React, { useState, useContext } from 'react';
 import { AppContext } from '../App';
 import { LOCAL_STORAGE_KEYS } from '../constants';
@@ -108,12 +109,15 @@ export const Auth: React.FC<AuthProps> = ({ onSellerLoginSuccess, onBuyerLoginSu
                     return;
                 }
 
+                // FIX: Add missing 'browsingHistory' and 'quests' properties to conform to the 'Buyer' type.
                 const newBuyer: Buyer = {
                     id: `buyer-${Date.now()}`,
                     email: email.trim().toLowerCase(),
                     password: password,
                     fullName: fullName.trim(),
                     phoneNumber: phoneNumber.trim(),
+                    browsingHistory: [],
+                    quests: [],
                 };
 
                 try {
