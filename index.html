@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.ico" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>SaloneKart - Buy & Sell in Sierra Leone</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+      body {
+        transition: background-color 0.3s ease, color 0.3s ease;
+      }
+      .mobile-nav-enter { transform: translateX(-100%); }
+      .mobile-nav-enter-active { transform: translateX(0); transition: transform 300ms ease-out; }
+      .mobile-nav-exit { transform: translateX(0); }
+      .mobile-nav-exit-active { transform: translateX(-100%); transition: transform 300ms ease-in; }
+      
+      .filter-drawer-enter { transform: translateY(100%); }
+      .filter-drawer-enter-active { transform: translateY(0); transition: transform 300ms ease-out; }
+      .filter-drawer-exit { transform: translateY(0); }
+      .filter-drawer-exit-active { transform: translateY(100%); transition: transform 300ms ease-in; }
+
+      .backdrop-enter { opacity: 0; }
+      .backdrop-enter-active { opacity: 1; transition: opacity 300ms; }
+      .backdrop-exit { opacity: 1; }
+      .backdrop-exit-active { opacity: 0; transition: opacity 300ms; }
+    </style>
+    <script>
+      tailwind.config = {
+        darkMode: 'class',
+        theme: {
+          extend: {
+            fontFamily: {
+              sans: ['Poppins', 'sans-serif'],
+            },
+            colors: {
+              primary: '#0078D4', // Sierra Leone Blue
+              secondary: '#10A341', // Sierra Leone Green
+              accent: '#FFFFFF',
+              lightgray: '#F0F2F5',
+            },
+            keyframes: {
+              'fade-in': {
+                '0%': { opacity: '0' },
+                '100%': { opacity: '1' },
+              },
+            },
+            animation: {
+              'fade-in': 'fade-in 0.5s ease-in-out',
+            },
+          },
+        },
+      }
+    </script>
+  <script type="importmap">
+{
+  "imports": {
+    "react-dom/": "https://aistudiocdn.com/react-dom@^19.1.1/",
+    "@google/genai": "https://aistudiocdn.com/@google/genai@^1.20.0",
+    "react/": "https://aistudiocdn.com/react@^19.1.1/",
+    "react": "https://aistudiocdn.com/react@^19.1.1"
+  }
+}
+</script>
+</head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/index.tsx"></script>
+  </body>
+</html>
